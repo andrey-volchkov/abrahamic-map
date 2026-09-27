@@ -1,0 +1,39 @@
+{
+  "levels": {
+    "L2": {
+      "x0": 1089.6,
+      "y0": 5156.4,
+      "k": 1.2,
+      "W": 2280,
+      "H": 2274,
+      "q": 2
+    },
+    "L0": {
+      "x0": -17283.939626127692,
+      "y0": 8435.203933747378,
+      "k": 8.439423645570162,
+      "W": 4096,
+      "H": 1999,
+      "q": 8
+    },
+    "L1": {
+      "x0": -3423,
+      "y0": 7818,
+      "k": 3,
+      "W": 2836,
+      "H": 1672,
+      "q": 4
+    }
+  },
+  "projection": {
+    "name": "Equal Earth",
+    "centralMeridian": 11,
+    "radiusKm": 6371,
+    "xMax": 17243.939626127692,
+    "yMax": 8392.91813859188
+  },
+  "encoding": {
+    "height": "Lk_h.bin: HGT1 header + raw-deflated zigzag-varint MED residuals; metres = value * q",
+    "masks": "Lk_m.png RGB = coast SDF, aridity, river greening; Lk_l.png = lake SDF; SDF px = (v-128)/16, positive = land/lake"
+  }
+}
