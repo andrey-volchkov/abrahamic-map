@@ -225,6 +225,7 @@ export class App {
     this.film.i = i;
     this.film.t = 0;
     this.film.phase = 'fly';
+    this.resumeAfterPanel = false;
     this.select(null);
     this.header.setAct(act);
     this.chapterEvents = new Set(ch.events ?? []);
@@ -307,9 +308,13 @@ export class App {
   }
 
   // ------------------------------------------------------------------ selection
+  private resumeAfterPanel = false;
+
   select(id: string | null, fly = false) {
     this.selected = id;
     if (!id) {
+      if (this.panel.open && this.resumeAfterPanel && this.mode === 'film') this.setPlaying(true);
+      this.resumeAfterPanel = false;
       this.panel.hide();
       return;
     }
@@ -318,7 +323,10 @@ export class App {
     const same = byYear.filter((x) => x.act === e.act);
     const k = same.indexOf(e);
     this.panel.show(e, same[k - 1] ?? null, same[k + 1] ?? null);
-    if (this.mode === 'film') this.setPlaying(false);
+    if (this.mode === 'film') {
+      if (!this.panel.open || !this.resumeAfterPanel) this.resumeAfterPanel = this.resumeAfterPanel || this.film.playing;
+      this.setPlaying(false);
+    }
     if (fly && this.mode === 'free') {
       const [x, y] = project(e.lon, e.lat);
       const v = this.stage.rig.view;
@@ -566,6 +574,13 @@ export class App {
         const prio = p.kind === 'sea' ? 30 : p.kind === 'polity' ? 40 : 20;
         labels.push({ key: 'p:' + p.id, x: p.x, y: p.y, h: 0, text: p.name, cls, prio, anchor: 'center', angle: p.angle, alpha: a });
       }
+    }
+    // earlier acts, seen from afar, keep a quiet name next to their glow
+    for (let k = 0; k < 2; k++) {
+      const a = acts[k];
+      if (this.hearthA[k] < 0.15) continue;
+      const [hx, hy] = project(a.hearth.lon, a.hearth.lat);
+      labels.push({ key: 'h:' + k, x: hx, y: hy - a.hearth.r * 0.9, h: 0, text: `Акт ${a.roman} · ${a.title}`, cls: 'hearth', prio: 90, anchor: 'center', alpha: Math.min(1, this.hearthA[k] * 2.2) });
     }
     this.world.setMarkers(markers);
     // keep labels clear of the interface
