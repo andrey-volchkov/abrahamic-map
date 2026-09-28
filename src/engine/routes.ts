@@ -45,7 +45,11 @@ void main() {
   vAlong = along;
   vPx = px;
   vRankA = rank > 0.0 ? 1.0 - smoothstep(uRankFade - 0.5, uRankFade + 0.5, rank) : 1.0;
-  gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.0);
+  // pull towards the camera so valleys (where the mesh interpolates above the true
+  // surface) never swallow the line
+  vec4 mv = viewMatrix * vec4(w, 1.0);
+  mv.xyz *= 0.993;
+  gl_Position = projectionMatrix * mv;
 }
 `;
 

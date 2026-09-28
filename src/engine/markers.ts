@@ -59,9 +59,11 @@ void main() {
     col += c * halo * 0.6;
   } else {
     // event: luminous dot, pulsing ring when highlighted
-    float ring = 1.0 - smoothstep(aa, aa * 2.5, abs(r - 0.62 - 0.1 * sin(uTime * 3.0)));
-    col = c * (core * 2.6 + halo * 1.6) + c * ring * vHi * 2.2;
-    a = max(core, halo + ring * vHi);
+    float ring = 1.0 - smoothstep(aa, aa * 2.5, abs(r - 0.58 - 0.12 * sin(uTime * 3.0)));
+    float ring2 = 1.0 - smoothstep(aa, aa * 2.0, abs(r - 0.4));
+    float dotc = 1.0 - smoothstep(0.17 - aa, 0.17 + aa, r);
+    col = c * (core * 1.4 + halo * 2.2) + vec3(1.0, 0.96, 0.88) * dotc * 2.2 + c * ring * vHi * 2.4 + c * ring2 * 1.2;
+    a = max(max(core, ring2 * 0.9), halo + ring * vHi);
     if (kind > 1.5) { col = c * (rim * 2.0 + halo); a = max(rim, halo * 0.6); }
   }
   a *= vA;

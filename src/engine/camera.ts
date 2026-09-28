@@ -77,6 +77,8 @@ export class CameraRig {
   drift = { heading: 0, dist: 0, pitch: 0 };
   private flight: Flight | null = null;
   target = new THREE.Vector3();
+  /** horizontal screen shift of the subject, as a fraction of the view width (+ = right) */
+  shift = 0;
 
   constructor(fov = 30) {
     this.camera = new THREE.PerspectiveCamera(fov, 1, 1, 1e6);
@@ -142,6 +144,11 @@ export class CameraRig {
     const p = Math.max(0.01, Math.min(80, v.pitch + this.drift.pitch)) * D2R;
     const h = (v.heading + this.drift.heading) * D2R;
     this.target.set(v.x, 0, -v.y);
+    if (this.shift) {
+      const w = 2 * dist * Math.tan((this.camera.fov * Math.PI) / 360) * this.camera.aspect;
+      this.target.x -= Math.cos(h) * this.shift * w;
+      this.target.z -= Math.sin(h) * this.shift * w;
+    }
     const dir = new THREE.Vector3(-Math.sin(p) * Math.sin(h), Math.cos(p), Math.sin(p) * Math.cos(h));
     this.camera.position.copy(this.target).addScaledVector(dir, dist);
     this.camera.up.set(Math.sin(h), 0, -Math.cos(h));

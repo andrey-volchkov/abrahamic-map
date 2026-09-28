@@ -1,26 +1,57 @@
+import '@fontsource/cormorant-garamond/500.css';
+import '@fontsource/cormorant-garamond/600.css';
+import '@fontsource/cormorant-garamond/500-italic.css';
+import '@fontsource/source-serif-4/400.css';
+import '@fontsource/source-serif-4/400-italic.css';
+import '@fontsource/ibm-plex-sans/400.css';
+import '@fontsource/ibm-plex-sans/500.css';
 import './style.css';
-import { Stage } from './engine/stage';
-import { loadLevel, loadMeta } from './engine/assets';
+import gsap from 'gsap';
+import { App } from './app';
 import { viewFromSpec } from './engine/camera';
 
-async function boot() {
-  const canvas = document.getElementById('scene') as HTMLCanvasElement;
-  const stage = new Stage(canvas);
-  (window as any).stage = stage;
-  const meta = await loadMeta();
-  const params = new URLSearchParams(location.search);
-  const v = params.get('v');
-  const spec = v ? JSON.parse(decodeURIComponent(v)) : { lon: 35, lat: 32, dist: 1400, pitch: 40, heading: 0 };
-  stage.rig.set(viewFromSpec(spec));
-  const L0 = await loadLevel('L0', meta.levels.L0);
-  stage.addLevel(0, L0);
-  const [L1, L2] = await Promise.all([loadLevel('L1', meta.levels.L1), loadLevel('L2', meta.levels.L2)]);
-  stage.addLevel(1, L1);
-  stage.addLevel(2, L2);
-  stage.tu.uHas.value.set(1, 1);
-  const dbg = params.get('dbg');
-  if (dbg) stage.terrain.material.uniforms.uDebug.value = +dbg;
-  stage.start();
-  (window as any).__ready = true;
+function webglOk() {
+  try {
+    const c = document.createElement('canvas');
+    return !!c.getContext('webgl2');
+  } catch {
+    return false;
+  }
 }
-boot();
+
+if (!webglOk()) {
+  document.getElementById('ui')!.innerHTML =
+    '<div class="intro"><h1 style="font-size:48px">Нужен WebGL 2</h1><div class="sub">Откройте страницу в свежей версии Chrome, Firefox, Safari или Edge.</div></div>';
+} else {
+  const app = new App();
+  app.boot().then(() => {
+    // debugging / screenshots: ?v={"lon":..,"lat":..,"dist":..}&year=..&chapter=..
+    const q = new URLSearchParams(location.search);
+    if (q.get('fast')) gsap.globalTimeline.timeScale(50);
+    if (q.get('step')) app.stage.fixedDt = +(q.get('step') as string);
+    if (q.get('snap') || q.get('free') || q.get('chapter')) app.header.show(true);
+    if (q.get('v')) app.stage.rig.set(viewFromSpec(JSON.parse(q.get('v') as string)));
+    if (q.get('year')) app.setYear(+(q.get('year') as string));
+    if (q.get('dbg')) app.stage.terrain.material.uniforms.uDebug.value = +(q.get('dbg') as string);
+    if (q.get('snap')) {
+      app.intro.hide();
+      app.snapTo(+(q.get('snap') as string), +(q.get('frac') ?? 0.7));
+      if (q.get('goto')) {
+        app.setPlaying(true);
+        app.go(+(q.get('goto') as string));
+      }
+    } else if (q.get('chapter')) {
+      app.intro.hide();
+      app.enterFilm(true);
+      const i = +(q.get('chapter') as string);
+      app.film.token++;
+      app.film.i = i - 1;
+      app.go(i);
+    }
+    if (q.get('free')) {
+      app.intro.hide();
+      app.enterFree();
+    }
+    if (q.get('sel')) app.select(q.get('sel') as string);
+  });
+}

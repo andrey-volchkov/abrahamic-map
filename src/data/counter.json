@@ -1,0 +1,9 @@
+{
+  "label": "Доля христиан в населении мира",
+  "note": "Опубликованные оценки. Между опорными годами значение не интерполируется. Для эпох до XX в. сопоставимых надёжных оценок нет.",
+  "points": [
+    { "year": 1910, "value": "≈ 35%", "source": "Pew Research Center, «Global Christianity», 2011 (по Atlas of Global Christianity)" },
+    { "year": 2010, "value": "30,6%", "source": "Pew Research Center, «How the Global Religious Landscape Changed From 2010 to 2020», 2025" },
+    { "year": 2020, "value": "28,8%", "source": "Pew Research Center, «How the Global Religious Landscape Changed From 2010 to 2020», 2025" }
+  ]
+}

@@ -175,7 +175,7 @@ void main() {
   float slope = 1.0 - N.y;
   float snow = smoothstep(snowline, snowline + 700.0, h + noiseAt(vMap, 120.0, 3) * 500.0) * (1.0 - smoothstep(0.35, 0.8, slope));
   snow = max(snow, smoothstep(66.0, 72.0, alat) * step(lat, 0.0)); // Antarctica
-  snow = max(snow, smoothstep(1100.0, 2000.0, h) * smoothstep(58.0, 68.0, alat) * 0.8);
+  snow = max(snow, smoothstep(1300.0, 2200.0, h) * smoothstep(60.0, 70.0, alat) * 0.55);
   col = mix(col, cSnow, clamp(snow, 0.0, 1.0));
 
   // lighting
@@ -251,7 +251,7 @@ void main() {
     vec4 hh = uHearth[i];
     if (hh.w <= 0.0) continue;
     float d = distance(vMap, hh.xy) / hh.z;
-    glow += srgb(vec3(1.0, 0.78, 0.45)) * hh.w * (exp(-d * d * 2.2) * 0.9 + exp(-d * d * 12.0) * 1.6);
+    glow += srgb(vec3(1.0, 0.72, 0.36)) * hh.w * (exp(-d * d * 3.0) * 0.55 + exp(-d * d * 16.0) * 1.9 + exp(-d * d * 90.0) * 2.5);
   }
   c += glow;
 

@@ -166,9 +166,12 @@ export class Stage {
     return Math.min(46, Math.max(7, 8.2 * Math.pow(dist / 1000, 0.36)));
   }
 
+  /** debug: fixed time step per frame (for headless capture of animations) */
+  fixedDt = 0;
+
   frame = () => {
     const now = performance.now();
-    const dt = Math.min(0.1, (now - this.last) / 1000);
+    const dt = this.fixedDt || Math.min(0.1, (now - this.last) / 1000);
     this.adapt(now - this.last);
     this.last = now;
     this.time += dt;

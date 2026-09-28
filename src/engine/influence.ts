@@ -16,39 +16,61 @@ uniform float uZoneOn;
 uniform sampler2D uZNoise;
 
 vec3 applyZones(vec3 c, vec2 p, float fp, float landCover, float time) {
-  if (uZoneOn <= 0.0) return c;
+  if (uZoneOn <= 0.0 || landCover <= 0.0) return c;
   vec2 uv = (p - uZoneWin.xy) * uZoneWin.w;
   if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) return c;
   vec4 a = texture(uZ0, uv), b = texture(uZ1, uv), d = texture(uZ2, uv);
-  float v[${ZONE_CATS}] = float[](a.r, a.g, a.b, a.a, b.r, b.g, b.b, b.a, d.r, d.g, d.b, d.a);
+  float v[8] = float[](a.r, a.g, a.b, a.a, b.r, b.g, b.b, b.a);
+  // domain-warped noise keeps the contours organic at every scale
+  vec2 wp = p + (texture(uZNoise, p / 2600.0).rg - 0.5) * 900.0;
+  float n = texture(uZNoise, wp / 900.0).r * 0.55 + texture(uZNoise, wp / 240.0).g * 0.3 + texture(uZNoise, wp / 70.0).b * 0.15;
+  float T = 0.46 + (n - 0.5) * 0.42;
+  float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
+
+  // solid layer: the dominant tradition
   int im = 0; float m1 = 0.0; float m2 = 0.0; int i2 = 0;
-  for (int i = 0; i < ${ZONE_CATS}; i++) {
+  for (int i = 0; i < 8; i++) {
     if (v[i] > m1) { m2 = m1; i2 = im; m1 = v[i]; im = i; }
     else if (v[i] > m2) { m2 = v[i]; i2 = i; }
   }
-  if (m1 < 0.12) return c;
-  float n = texture(uZNoise, p / 700.0).r * 0.6 + texture(uZNoise, p / 170.0).g * 0.4;
-  float T = 0.5 + (n - 0.5) * 0.34;
-  float aa = max(fwidth(m1) * 1.1, 0.004);
-  float pres = smoothstep(T - aa, T + aa, m1);
-  vec3 zc = uZoneCol[im];
-  // soft blend where two traditions overlap
-  float share = 1.0 - smoothstep(0.0, 0.35, (m1 - m2) / max(m1, 1e-3));
-  zc = mix(zc, uZoneCol[i2], share * 0.5 * step(T, m2));
-  float style = uZoneStyle[im];
-  float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
-  vec3 wash = zc * (lum * 1.9 + 0.012);
-  float fill = mix(0.62, 0.4, style);
-  if (style > 0.5) {
-    float sp = fp * 9.0;
-    float hs = abs(fract((p.x + p.y) / sp) - 0.5) * sp / fp;
-    fill *= 0.35 + 0.65 * (1.0 - smoothstep(1.2, 2.2, hs));
+  if (m1 > 0.1) {
+    float aa = max(fwidth(m1) * 1.1, 0.004);
+    float pres = smoothstep(T - aa, T + aa, m1);
+    vec3 zc = uZoneCol[im];
+    float share = 1.0 - smoothstep(0.0, 0.3, (m1 - m2) / max(m1, 1e-3));
+    zc = mix(zc, uZoneCol[i2], share * 0.5 * step(T, m2));
+    // tint that keeps the relief: hue from the zone colour, luminance from the model
+    float zl = max(dot(zc, vec3(0.2126, 0.7152, 0.0722)), 1e-3);
+    vec3 wash = c * mix(vec3(1.0), zc / zl, 0.85) * 1.04;
+    // watercolour: pigment pools towards the edge, the interior stays light
+    float inner = smoothstep(T, T + 0.5, m1);
+    float fill = mix(0.75, 0.42, inner);
+    c = mix(c, wash, pres * fill * landCover * uZoneOn);
+    float rim = 1.0 - smoothstep(0.0, aa * 2.6, abs(m1 - T));
+    c += zc * rim * 0.5 * landCover * uZoneOn;
   }
-  c = mix(c, wash, pres * fill * landCover * uZoneOn);
-  // luminous rim at the zone boundary
-  float rim = 1.0 - smoothstep(0.0, aa * 3.0, abs(m1 - T));
-  float innerGlow = smoothstep(T, T + 0.5, m1) * 0.0;
-  c += zc * (rim * 0.55 + innerGlow) * landCover * uZoneOn * (1.0 - style * 0.5);
+
+  // hatched layer: political control (e.g. the caliphate) over whatever lies beneath
+  float h1 = d.r; int hi = 8;
+  if (d.g > h1) { h1 = d.g; hi = 9; }
+  if (d.b > h1) { h1 = d.b; hi = 10; }
+  if (d.a > h1) { h1 = d.a; hi = 11; }
+  if (h1 > 0.1) {
+    float aa = max(fwidth(h1) * 1.1, 0.004);
+    float hp = smoothstep(T - aa, T + aa, h1);
+    vec3 hc = uZoneCol[hi];
+    float sl = log2(fp * 10.0);
+    float sf = floor(sl);
+    float st = sl - sf;
+    float s1 = exp2(sf), s2 = exp2(sf + 1.0);
+    float q = (p.x + p.y) * 0.7071;
+    float l1 = 1.0 - smoothstep(0.9, 1.7, abs(fract(q / s1) - 0.5) * s1 / fp);
+    float l2 = 1.0 - smoothstep(0.9, 1.7, abs(fract(q / s2) - 0.5) * s2 / fp);
+    float stripe = mix(l1, l2, st);
+    c = mix(c, hc * (lum * 2.1 + 0.02), hp * (0.12 + 0.55 * stripe) * landCover * uZoneOn);
+    float rim = 1.0 - smoothstep(0.0, aa * 2.5, abs(h1 - T));
+    c += hc * rim * 0.35 * landCover * uZoneOn;
+  }
   return c;
 }
 `;
