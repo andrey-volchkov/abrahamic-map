@@ -476,7 +476,7 @@ export class App {
     for (let k = 0; k < 2; k++) {
       const a = acts[k];
       const [hx, hy] = project(a.hearth.lon, a.hearth.lat);
-      const past = this.mode === 'film' ? act.id > a.id : this.year > a.to - 50;
+      const past = this.mode === "film" ? act.id > a.id : this.year > a.to + 60;
       const ratio = rig.view.dist / a.hearth.r;
       const want = past ? Math.min(1, Math.max(0, (ratio - 4) / 12)) * (k === 0 ? 0.6 : 0.22) : 0;
       this.hearthA[k] += (want - this.hearthA[k]) * Math.min(1, dt * 0.8);
