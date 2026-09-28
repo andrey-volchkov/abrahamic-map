@@ -14,7 +14,8 @@ uniform vec3 uZoneCol[${ZONE_CATS}];
 uniform float uZoneStyle[${ZONE_CATS}]; // 0 solid, 1 hatched
 uniform float uZoneOn;
 uniform float uZoneFill;
-uniform sampler2D uZNoise;
+uniform float uZoneFillK;
+uniform sampler2D uNoise;
 
 vec3 applyZones(vec3 c, vec2 p, float fp, float landCover, float time) {
   if (uZoneOn <= 0.0 || landCover <= 0.0) return c;
@@ -23,8 +24,8 @@ vec3 applyZones(vec3 c, vec2 p, float fp, float landCover, float time) {
   vec4 a = texture(uZ0, uv), b = texture(uZ1, uv), d = texture(uZ2, uv);
   float v[8] = float[](a.r, a.g, a.b, a.a, b.r, b.g, b.b, b.a);
   // domain-warped noise keeps the contours organic at every scale
-  vec2 wp = p + (texture(uZNoise, p / 2600.0).rg - 0.5) * 900.0;
-  float n = texture(uZNoise, wp / 900.0).r * 0.55 + texture(uZNoise, wp / 240.0).g * 0.3 + texture(uZNoise, wp / 70.0).b * 0.15;
+  vec2 wp = p + (texture(uNoise, p / 2600.0).rg - 0.5) * 900.0;
+  float n = texture(uNoise, wp / 900.0).r * 0.55 + texture(uNoise, wp / 240.0).g * 0.3 + texture(uNoise, wp / 70.0).b * 0.15;
   float T = 0.46 + (n - 0.5) * 0.42;
   float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
 
@@ -46,7 +47,7 @@ vec3 applyZones(vec3 c, vec2 p, float fp, float landCover, float time) {
     // watercolour: pigment pools towards the edge, the interior stays light
     float inner = smoothstep(T, T + 0.5, m1);
     float fill = mix(0.72, uZoneFill, inner);
-    c = mix(c, wash, pres * fill * landCover * uZoneOn);
+    c = mix(c, wash, pres * fill * uZoneFillK * landCover * uZoneOn);
     float rim = 1.0 - smoothstep(0.0, aa * 2.6, abs(m1 - T));
     c += zc * rim * 0.5 * landCover * uZoneOn;
   }
@@ -123,7 +124,7 @@ export interface Splat {
   cat: number;
 }
 
-export function createZoneUniforms(noise: THREE.Texture) {
+export function createZoneUniforms() {
   const cols: THREE.Color[] = [];
   const style: number[] = [];
   for (let i = 0; i < ZONE_CATS; i++) {
@@ -139,7 +140,7 @@ export function createZoneUniforms(noise: THREE.Texture) {
     uZoneStyle: { value: style },
     uZoneOn: { value: 1 },
     uZoneFill: { value: 0.36 },
-    uZNoise: { value: noise },
+    uZoneFillK: { value: 1 },
   };
 }
 export type ZoneUniforms = ReturnType<typeof createZoneUniforms>;

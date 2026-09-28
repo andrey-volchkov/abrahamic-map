@@ -446,7 +446,8 @@ export class App {
 
     const v = rig.view;
     // zones step back at close range, where the relief itself tells the story
-    this.stage.zu.uZoneOn.value = 0.5 + 0.5 * Math.min(1, Math.max(0, (v.dist - 500) / 1300));
+    this.stage.zu.uZoneOn.value = 0.6 + 0.4 * Math.min(1, Math.max(0, (v.dist - 500) / 1300));
+    this.stage.zu.uZoneFillK.value = 0.2 + 0.8 * Math.min(1, Math.max(0, (v.dist - 450) / 1400));
     this.stage.zu.uZoneFill.value = 0.36 + 0.2 * Math.min(1, Math.max(0, (v.dist - 9000) / 25000));
     if (this.world.rivers) {
       const u = this.world.rivers.material.uniforms;

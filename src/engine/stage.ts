@@ -20,6 +20,7 @@ import { HeightField, type Level } from './assets';
 import { Terrain } from './terrain';
 import { Influence, createZoneUniforms, type Splat } from './influence';
 import { createSlab } from './slab';
+import { bakeShadows } from './shadowBake';
 
 export class Stage {
   renderer: THREE.WebGLRenderer;
@@ -28,7 +29,7 @@ export class Stage {
   composer: EffectComposer;
   tu = createTerrainUniforms();
   noise = createNoiseTexture();
-  zu = createZoneUniforms(this.noise);
+  zu = createZoneUniforms();
   heights = new HeightField();
   terrain: Terrain;
   influence: Influence;
@@ -120,7 +121,9 @@ export class Stage {
     const Rr = [u.uR0, u.uR1, u.uR2][slot], T = [u.uT0, u.uT1, u.uT2][slot];
     H.value = L.hTex;
     M.value = L.mTex;
-    Lk.value = L.lTex;
+    // lake SDF (R) + baked soft shadows of the relief (G)
+    Lk.value = bakeShadows(this.renderer, L.hTex, L.lTex, L.W, L.H, L.k, this.light.uSunDir.value, [20, 13, 10][slot]);
+    L.lTex.dispose();
     Rr.value.set(L.x0, L.y0, L.W * L.k, L.H * L.k);
     T.value.set(1 / L.W, 1 / L.H, L.k);
     this.heights.add(L);

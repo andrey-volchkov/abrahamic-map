@@ -60,7 +60,6 @@ uniform float uShadeExag;
 uniform float uTime;
 uniform float uCamDist;
 uniform vec3 uHaze;
-uniform sampler2D uNoise;
 uniform vec4 uHearth[4];      // x, y, radius km, intensity
 uniform vec4 uFocus;          // x, y, radius km, strength
 uniform float uRivers;
@@ -68,7 +67,7 @@ uniform int uDebug;
 
 vec3 srgb(vec3 c) { return pow(c, vec3(2.2)); }
 
-struct S { float h; vec2 g; float coast; float arid; float green; float lake; float hb; float k; float shade; vec2 gb; };
+struct S { float h; vec2 g; float coast; float arid; float green; float lake; float hb; float k; float shade; vec2 gb; float sun; };
 
 void samp(sampler2D H, sampler2D M, sampler2D L, vec4 R, vec3 T, vec2 p, float fp, float w, vec2 sunOff, inout S s) {
   vec2 uv = lvlUV(R, p);
@@ -82,7 +81,7 @@ void samp(sampler2D H, sampler2D M, sampler2D L, vec4 R, vec3 T, vec2 p, float f
   float hn = textureLod(H, uv - dv, lod).r;
   float hs = textureLod(H, uv + dv, lod).r;
   vec3 m = textureLod(M, uv, lod).rgb;
-  float lk = textureLod(L, uv, lod).r;
+  vec2 lks = textureLod(L, uv, lod).rg;
   float hb = textureLod(H, uv, lod + 3.5).r;
   // coast distance at a point offset towards the sun: land there shades the water here
   float sh = textureLod(M, lvlUV(R, p + sunOff), lod).r;
@@ -91,7 +90,8 @@ void samp(sampler2D H, sampler2D M, sampler2D L, vec4 R, vec3 T, vec2 p, float f
   s.coast += w * sdfKm(m.r, k);
   s.arid += w * m.g;
   s.green += w * m.b;
-  s.lake += w * sdfKm(lk, k);
+  s.lake += w * sdfKm(lks.r, k);
+  s.sun += w * lks.g;
   s.hb += w * hb;
   s.k += w * k;
   s.shade += w * sdfKm(sh, k);
@@ -121,7 +121,7 @@ void main() {
   float fp = max(length(dpx), length(dpy)); // km per pixel
 
   vec3 w = levelWeights(vMap);
-  S s = S(0.0, vec2(0.0), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, vec2(0.0));
+  S s = S(0.0, vec2(0.0), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, vec2(0.0), 0.0);
   vec2 sun2 = normalize(vec2(uSunDir.x, -uSunDir.z));
   vec2 sunOff = sun2 * fp * 2.6;
   if (w.x > 0.0) samp(uH0, uM0, uL0, uR0, uT0, vMap, fp, w.x, sunOff, s);
@@ -190,7 +190,7 @@ void main() {
 
   // lighting
   float ndl = dot(N, L);
-  float diff = clamp((ndl + 0.18) / 1.18, 0.0, 1.0);
+  float diff = clamp((ndl + 0.18) / 1.18, 0.0, 1.0) * mix(1.0, s.sun, 0.8);
   float cav = clamp(1.0 + (h - s.hb) * 0.00045 * es / 12.0, 0.72, 1.12);
   vec3 amb = mix(uGroundColor, uSkyColor, N.y * 0.5 + 0.5);
   vec3 land = col * (amb * cav + uSunColor * diff * mix(1.0, cav, 0.5));
