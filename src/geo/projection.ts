@@ -43,13 +43,3 @@ export function invert(xk: number, yk: number): [number, number] | null {
 
 export const X_MAX = projectRel(180, 0)[0];
 export const Y_MAX = projectRel(0, 90)[1];
-
-/** Map outline (clockwise), used for the slab walls. */
-export function outline(stepsPerSide = 180): [number, number][] {
-  const pts: [number, number][] = [];
-  for (let i = 0; i <= stepsPerSide; i++) pts.push(projectRel(-180 + (360 * i) / stepsPerSide, 90)); // top W→E
-  for (let i = 1; i <= stepsPerSide; i++) pts.push(projectRel(180, 90 - (180 * i) / stepsPerSide)); // east N→S
-  for (let i = 1; i <= stepsPerSide; i++) pts.push(projectRel(180 - (360 * i) / stepsPerSide, -90)); // bottom E→W
-  for (let i = 1; i < stepsPerSide; i++) pts.push(projectRel(-180, -90 + (180 * i) / stepsPerSide)); // west S→N
-  return pts;
-}

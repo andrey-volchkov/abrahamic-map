@@ -1,7 +1,10 @@
 // Ribbons draped on the relief (or arcing above it): routes, roads, rivers.
-// Width is constant in screen pixels; routes reveal progressively with a glowing head.
+// Width is constant in screen pixels. Routes are drawn like atlas campaign lines: an ink
+// line with a paper casing, an arrowhead at the drawing front and small arrows along the
+// way that slowly travel in the direction of movement.
 import * as THREE from 'three';
 import { PROJ_GLSL, TERRAIN_GLSL, type TerrainUniforms } from './glsl';
+import { PAPER } from '../ui/palette';
 
 const VERT = /* glsl */ `
 ${PROJ_GLSL}
@@ -11,8 +14,10 @@ in vec2 tan2;
 in float side;
 in float along;
 in float rank;
-uniform float uWidth;      // px
-uniform float uLift;       // km above the surface (scaled by exaggeration)
+uniform float uWidth;      // ink line width, px
+uniform float uCase;       // paper casing each side, px
+uniform float uArrow;      // arrowhead half-width, px (0 = none)
+uniform float uLift;       // px above the surface
 uniform float uArc;        // arc height km (0 = draped)
 uniform float uTotal;
 uniform float uPxK;        // 2*tan(fov/2)/viewportHeight
@@ -21,29 +26,32 @@ out float vSide;
 out float vAlong;
 out float vPx;             // km per pixel here
 out float vRankA;
+out float vHalf;           // half-width of the ribbon geometry, px
+out float vLine;           // half-width of the ink line, px
 void main() {
   float t = uTotal > 0.0 ? along / uTotal : 0.0;
-  vec3 base;
   vec2 p = pos2;
   vec4 mv0 = viewMatrix * vec4(p.x, 0.0, -p.y, 1.0);
   float px = uPxK * max(-mv0.z, 1.0);
   float y = uArc > 0.0 ? uArc * 4.0 * t * (1.0 - t) + 1.0 : max(surfaceY(p, px * 2.0), 0.0) + uLift * px;
-  base = vec3(p.x, y, -p.y);
+  vec3 base = vec3(p.x, y, -p.y);
   vec3 tw = normalize(vec3(tan2.x, 0.0, -tan2.y));
   vec3 nrm;
   if (uArc > 0.0) {
     vec3 vd = normalize(cameraPosition - base);
-    // arc tangent includes the vertical component
     vec3 ta = normalize(tw * uTotal + vec3(0.0, uArc * 4.0 * (1.0 - 2.0 * t), 0.0));
     nrm = normalize(cross(ta, vd));
   } else {
     nrm = vec3(-tw.z, 0.0, tw.x);
   }
-  float wpx = uWidth * (rank > 0.0 ? clamp(1.6 - rank * 0.18, 0.5, 1.4) : 1.0);
-  vec3 w = base + nrm * side * wpx * 0.5 * px;
+  float line = 0.5 * uWidth * (rank > 0.0 ? clamp(1.6 - rank * 0.18, 0.5, 1.4) : 1.0);
+  float half_ = max(line, uArrow) + uCase + 1.0;
+  vec3 w = base + nrm * side * half_ * px;
   vSide = side;
   vAlong = along;
   vPx = px;
+  vHalf = half_;
+  vLine = line;
   vRankA = rank > 0.0 ? 1.0 - smoothstep(uRankFade - 0.5, uRankFade + 0.5, rank) : 1.0;
   // pull towards the camera so valleys (where the mesh interpolates above the true
   // surface) never swallow the line
@@ -59,39 +67,54 @@ in float vSide;
 in float vAlong;
 in float vPx;
 in float vRankA;
+in float vHalf;
+in float vLine;
 out vec4 fragColor;
 uniform vec3 uColor;
+uniform vec3 uCaseColor;
+uniform float uCase;
 uniform float uOpacity;
 uniform float uProgress;   // 0..1 of total
 uniform float uTotal;
 uniform float uDash;       // dash period in px (0 = solid)
-uniform float uGlow;       // HDR boost
 uniform float uTime;
-uniform float uFlow;       // moving pulses
-uniform float uHead;       // glowing head strength
+uniform float uArrow;      // arrowhead half-width px
+uniform float uChev;       // spacing of travelling arrows px (0 = none)
+
+// signed distance (px) to an arrowhead whose tip is at dh = 0 and base at dh = len
+float arrowSD(float o, float dh, float half_, float len) {
+  float s = half_ / len;
+  return max(max((o - s * dh) / sqrt(1.0 + s * s), dh - len), -dh);
+}
+
 void main() {
-  float head = uProgress * uTotal;
-  float fadeKm = max(vPx * 6.0, 1.0);
-  float shown = 1.0 - smoothstep(head - fadeKm, head, vAlong);
-  if (uProgress >= 0.999) shown = 1.0;
-  float a = abs(vSide);
-  float core = 1.0 - smoothstep(0.2, 1.0, a);
-  float alpha = core * shown * uOpacity * vRankA;
+  float o = abs(vSide) * vHalf;               // px from the centre line
+  float headKm = uProgress * uTotal;
+  float dh = (headKm - vAlong) / vPx;         // px behind the drawing front
+  float along = vAlong / vPx;
+  float aLen = uArrow * 1.7;
+  // line body, ending inside the arrowhead
+  float sd = max(o - vLine, -(dh - (uArrow > 0.0 ? aLen * 0.55 : 0.0)));
   if (uDash > 0.0) {
-    float d = fract(vAlong / (vPx * uDash));
-    alpha *= smoothstep(0.0, 0.08, d) * (1.0 - smoothstep(0.52, 0.6, d));
+    float u = fract(along / uDash) * uDash;
+    sd = max(sd, abs(u - uDash * 0.3) - uDash * 0.3);
   }
-  vec3 col = uColor * (1.0 + uGlow * (1.0 - smoothstep(0.0, 0.6, a)));
-  if (uFlow > 0.0) {
-    float f = fract((vAlong / vPx - uTime * 60.0) / 90.0);
-    col *= 1.0 + uFlow * smoothstep(0.85, 1.0, f) * 2.0;
+  if (uArrow > 0.0) {
+    sd = min(sd, arrowSD(o, dh, uArrow, aLen));
+    if (uChev > 0.0) {
+      // small arrows travelling along the drawn part
+      float cl = uArrow * 1.25;
+      float u = mod(along - uTime * 22.0, uChev);
+      float dc = cl - u;
+      float ok = step(aLen * 1.8, dh) * step(cl * 2.0, along);
+      sd = min(sd, mix(1e3, arrowSD(o, dc, uArrow * 0.78, cl), ok));
+    }
   }
-  // glowing head while drawing
-  float hd = exp(-pow((vAlong - head) / (vPx * 10.0), 2.0)) * step(uProgress, 0.999);
-  col += uColor * hd * uHead * 4.0;
-  alpha = max(alpha, hd * uHead * core * uOpacity);
-  if (alpha < 0.003) discard;
-  fragColor = vec4(col, alpha);
+  float ink = 1.0 - smoothstep(-0.6, 0.6, sd);
+  float cas = uCase > 0.0 ? 1.0 - smoothstep(uCase - 0.6, uCase + 0.6, sd) : 0.0;
+  float alpha = max(ink, cas * 0.9) * uOpacity * vRankA;
+  if (alpha < 0.004) discard;
+  fragColor = vec4(mix(uCaseColor, uColor, ink), alpha);
 }
 `;
 
@@ -100,11 +123,11 @@ export interface RibbonOptions {
   width?: number;
   opacity?: number;
   dash?: number;
-  glow?: number;
-  flow?: number;
   arc?: number;
   lift?: number;
-  head?: number;
+  arrow?: number;
+  chev?: number;
+  casing?: number;
 }
 
 /** Build ribbon geometry for one or several polylines (map km). */
@@ -175,17 +198,18 @@ export class Ribbon {
       uniforms: {
         ...tu,
         ...shared,
-        uColor: { value: new THREE.Color(o.color ?? '#e2b866').convertSRGBToLinear() },
+        uColor: { value: new THREE.Color(o.color ?? '#cc3a22').convertSRGBToLinear() },
+        uCaseColor: { value: new THREE.Color(PAPER).convertSRGBToLinear() },
         uWidth: { value: o.width ?? 3 },
+        uCase: { value: o.casing ?? 0 },
+        uArrow: { value: o.arrow ?? 0 },
+        uChev: { value: o.chev ?? 0 },
         uOpacity: { value: o.opacity ?? 1 },
         uProgress: { value: 1 },
         uTotal: { value: total },
         uDash: { value: o.dash ?? 0 },
-        uGlow: { value: o.glow ?? 1 },
-        uFlow: { value: o.flow ?? 0 },
         uArc: { value: o.arc ?? 0 },
         uLift: { value: o.lift ?? 1.5 },
-        uHead: { value: o.head ?? 1 },
         uRankFade: { value: 10 },
       },
       transparent: true,

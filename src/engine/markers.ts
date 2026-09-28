@@ -9,26 +9,28 @@ ${PROJ_GLSL}
 ${TERRAIN_GLSL}
 in vec2 corner;
 in vec4 mpos;   // map x, map y, size px, alpha
-in vec4 mcol;   // rgb, kind (0 dot, 1 event, 2 hollow)
-in float mhi;   // highlight 0..1
+in vec4 mcol;   // rgb, kind (0 city, 1 event, 2 muted event, 3 ripple)
+in float mhi;   // highlight 0..1 (ripple: progress 0..1)
 uniform vec2 uViewport;
 uniform float uPxK;
 out vec2 vC;
 out vec4 vCol;
 out float vA;
 out float vHi;
+out float vHalf;
 void main() {
   vec2 p = mpos.xy;
   vec4 mv0 = viewMatrix * vec4(p.x, 0.0, -p.y, 1.0);
   float px = uPxK * max(-mv0.z, 1.0);
   float y = max(surfaceY(p, px * 2.0), 0.0) + px * 3.0;
   vec4 clip = projectionMatrix * viewMatrix * vec4(p.x, y, -p.y, 1.0);
-  float size = mpos.z * (1.0 + mhi * 0.35);
+  float size = mpos.z;
   clip.xy += corner * size / uViewport * clip.w;
   vC = corner;
   vCol = mcol;
   vA = mpos.w;
   vHi = mhi;
+  vHalf = size * 0.5;
   gl_Position = clip;
 }
 `;
@@ -39,32 +41,46 @@ in vec2 vC;
 in vec4 vCol;
 in float vA;
 in float vHi;
+in float vHalf;
 out vec4 fragColor;
 uniform float uTime;
+const vec3 INK = vec3(0.034, 0.024, 0.015);
+const vec3 PAPER = vec3(0.905, 0.855, 0.735);
+float fill(float d) { return 1.0 - smoothstep(-0.6, 0.6, d); }
 void main() {
-  float r = length(vC);
-  if (r > 1.0) discard;
+  float r = length(vC) * vHalf;   // px from the centre
+  if (r > vHalf) discard;
   vec3 c = vCol.rgb;
   float kind = vCol.a;
-  float aa = fwidth(r) * 1.2;
-  float core = 1.0 - smoothstep(0.26 - aa, 0.26 + aa, r);
-  float rim = (1.0 - smoothstep(0.26, 0.26 + aa * 2.0, r)) - core;
-  float halo = exp(-r * r * 9.0) * 0.55;
+  vec3 col = PAPER;
   float a = 0.0;
-  vec3 col = vec3(0.0);
   if (kind < 0.5) {
-    // city: ivory dot with dark rim
-    col = mix(vec3(0.04, 0.035, 0.03), c * 1.6, core);
-    a = max(core, rim * 0.9) + halo * 0.35;
-    col += c * halo * 0.6;
+    // city: ink ring with a paper centre, capitals get a dot
+    float R = vHalf - 2.2;
+    float halo = fill(r - R - 1.6);
+    float ring = fill(abs(r - R + 0.7) - 0.8);
+    float dotc = fill(r - R * 0.42) * step(0.5, vHi);
+    col = mix(PAPER, INK, max(ring, dotc));
+    a = max(halo * 0.85, max(ring, dotc));
+  } else if (kind < 2.5) {
+    // event: a disc in the tradition's colour with an ink rim, a ring when highlighted
+    float R = kind < 1.5 ? 6.5 : 4.2;
+    float halo = fill(r - R - 2.2);
+    float disc = fill(r - R);
+    float rim = fill(abs(r - R + 0.6) - 0.75);
+    float rr = R + 5.5 + 1.5 * sin(uTime * 2.4) * step(0.01, vHi);
+    float ring = fill(abs(r - rr) - 1.1) * vHi;
+    float ringHalo = fill(abs(r - rr) - 2.4) * vHi;
+    col = mix(PAPER, c, disc);
+    col = mix(col, INK, rim * (kind < 1.5 ? 0.9 : 0.55));
+    col = mix(col, c, ring);
+    a = max(max(halo * 0.9, disc), max(ring, ringHalo * 0.7));
   } else {
-    // event: luminous dot, pulsing ring when highlighted
-    float ring = 1.0 - smoothstep(aa, aa * 2.5, abs(r - 0.58 - 0.12 * sin(uTime * 3.0)));
-    float ring2 = 1.0 - smoothstep(aa, aa * 2.0, abs(r - 0.4));
-    float dotc = 1.0 - smoothstep(0.17 - aa, 0.17 + aa, r);
-    col = c * (core * 1.4 + halo * 2.2) + vec3(1.0, 0.96, 0.88) * dotc * 2.2 + c * ring * vHi * 2.4 + c * ring2 * 1.2;
-    a = max(max(core, ring2 * 0.9), halo + ring * vHi);
-    if (kind > 1.5) { col = c * (rim * 2.0 + halo); a = max(rim, halo * 0.6); }
+    // ripple: a ring spreading from a new community
+    float R = vHalf - 2.0;
+    float ring = fill(abs(r - R) - 1.3);
+    col = c;
+    a = ring * (1.0 - vHi);
   }
   a *= vA;
   if (a < 0.004) discard;

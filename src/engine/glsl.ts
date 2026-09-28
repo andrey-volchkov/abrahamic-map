@@ -1,6 +1,6 @@
 // Shared GLSL: Equal Earth outline, multi-level terrain sampling, noise.
 import * as THREE from 'three';
-import { R, X_MAX, Y_MAX } from '../geo/projection';
+import { CM, R, X_MAX, Y_MAX } from '../geo/projection';
 
 export const PROJ_GLSL = /* glsl */ `
 const float EE_R = ${R.toFixed(1)};
@@ -8,6 +8,7 @@ const float EE_YMAX = ${Y_MAX.toFixed(3)};
 const float EE_XMAX = ${X_MAX.toFixed(3)};
 const float EE_A1 = 1.340264, EE_A2 = -0.081106, EE_A3 = 0.000893, EE_A4 = 0.003796;
 const float EE_M = 0.8660254037844386;
+const float EE_CM = ${CM.toFixed(1)};
 
 // returns vec2(signed distance to the outline in km (positive inside), latitude in degrees)
 vec2 eeOutline(vec2 p) {
@@ -23,6 +24,21 @@ vec2 eeOutline(vec2 p) {
   float xmax = 3.14159265 * cos(t) / (EE_M * (EE_A1 + 3.0 * EE_A2 * t2 + t6 * (7.0 * EE_A3 + 9.0 * EE_A4 * t2))) * EE_R;
   float lat = degrees(asin(clamp(sin(t) / EE_M, -1.0, 1.0)));
   return vec2(min(xmax - abs(p.x), EE_YMAX - abs(p.y)), lat);
+}
+
+// longitude in degrees (east of Greenwich) for a map point
+float eeLon(vec2 p) {
+  float y = clamp(p.y / EE_R, -1.3173, 1.3173);
+  float t = y;
+  for (int i = 0; i < 4; i++) {
+    float t2 = t * t; float t6 = t2 * t2 * t2;
+    float fy = t * (EE_A1 + EE_A2 * t2 + t6 * (EE_A3 + EE_A4 * t2)) - y;
+    float fpy = EE_A1 + 3.0 * EE_A2 * t2 + t6 * (7.0 * EE_A3 + 9.0 * EE_A4 * t2);
+    t -= fy / fpy;
+  }
+  float t2 = t * t; float t6 = t2 * t2 * t2;
+  float xmax = 3.14159265 * cos(t) / (EE_M * (EE_A1 + 3.0 * EE_A2 * t2 + t6 * (7.0 * EE_A3 + 9.0 * EE_A4 * t2))) * EE_R;
+  return 180.0 * p.x / max(xmax, 1.0) + EE_CM;
 }
 `;
 
@@ -48,6 +64,18 @@ vec4 levelWeights(vec2 p) {
   float w2 = uHas.y * lvlEdge(lvlUV(uR2, p), uT2.xy) * rem;
   rem -= w2;
   float w1 = uHas.x * lvlEdge(lvlUV(uR1, p), uT1.xy) * rem;
+  rem -= w1;
+  return vec4(rem, w1, w2, w3);
+}
+
+// the same, but a finer level hands over to the coarser one once it has more texels
+// per pixel than it can show: no visible seams between data sources at medium zoom
+vec4 levelWeightsFp(vec2 p, float fp) {
+  float w3 = uHas.z * lvlEdge(lvlUV(uR3, p), uT3.xy) * (1.0 - smoothstep(2.5 * uT3.z, 5.0 * uT3.z, fp));
+  float rem = 1.0 - w3;
+  float w2 = uHas.y * lvlEdge(lvlUV(uR2, p), uT2.xy) * rem * (1.0 - smoothstep(2.5 * uT2.z, 5.0 * uT2.z, fp));
+  rem -= w2;
+  float w1 = uHas.x * lvlEdge(lvlUV(uR1, p), uT1.xy) * rem * (1.0 - smoothstep(2.5 * uT1.z, 5.0 * uT1.z, fp));
   rem -= w1;
   return vec4(rem, w1, w2, w3);
 }

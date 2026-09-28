@@ -78,8 +78,6 @@ export class CameraRig {
   drift = { heading: 0, dist: 0, pitch: 0 };
   private flight: Flight | null = null;
   target = new THREE.Vector3();
-  /** horizontal screen shift of the subject, as a fraction of the view width (+ = right) */
-  shift = 0;
 
   constructor(fov = 30) {
     this.camera = new THREE.PerspectiveCamera(fov, 1, 1, 1e6);
@@ -141,35 +139,91 @@ export class CameraRig {
   }
 
   apply() {
-    const v = this.view;
-    // portrait screens see less of the map horizontally: pull back to compensate
-    const aspectK = Math.max(1, Math.pow(1.5 / Math.max(0.3, this.camera.aspect), 0.75));
-    const dist = v.dist * (1 + this.drift.dist) * aspectK;
-    const p = Math.max(0.01, Math.min(80, v.pitch + this.drift.pitch)) * D2R;
-    const h = (v.heading + this.drift.heading) * D2R;
-    this.target.set(v.x, 0, -v.y);
-    if (this.shift) {
-      const w = 2 * dist * Math.tan((this.camera.fov * Math.PI) / 360) * this.camera.aspect;
-      this.target.x -= Math.cos(h) * this.shift * w;
-      this.target.z -= Math.sin(h) * this.shift * w;
-    }
-    const dir = new THREE.Vector3(-Math.sin(p) * Math.sin(h), Math.cos(p), Math.sin(p) * Math.cos(h));
-    this.camera.position.copy(this.target).addScaledVector(dir, dist);
-    this.camera.up.set(Math.sin(h), 0, -Math.cos(h));
-    this.camera.lookAt(this.target);
-    this.camera.near = Math.max(0.5, dist * 0.03);
-    this.camera.far = dist * 12 + 60000;
-    this.camera.updateProjectionMatrix();
-    this.camera.updateMatrixWorld();
+    placeCamera(this.camera, this.view, this.drift, this.target);
   }
 
   /** point on the map plane (y=0) under a screen position, in map km */
   pick(ndcX: number, ndcY: number): [number, number] | null {
-    const ray = new THREE.Raycaster();
-    ray.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.camera);
-    const t = -ray.ray.origin.y / ray.ray.direction.y;
-    if (!(t > 0)) return null;
-    const p = ray.ray.origin.clone().addScaledVector(ray.ray.direction, t);
-    return [p.x, -p.z];
+    return pickPlane(this.camera, ndcX, ndcY);
   }
+}
+
+const NO_DRIFT = { heading: 0, dist: 0, pitch: 0 };
+
+/** Pose a perspective camera for a view (shared by the rig and the framing solver). */
+export function placeCamera(camera: THREE.PerspectiveCamera, v: View, drift = NO_DRIFT, target = new THREE.Vector3()) {
+  // portrait screens see less of the map horizontally: pull back to compensate
+  const aspectK = Math.max(1, Math.pow(1.2 / Math.max(0.3, camera.aspect), 0.75));
+  const dist = v.dist * (1 + drift.dist) * aspectK;
+  const p = Math.max(0.01, Math.min(80, v.pitch + drift.pitch)) * D2R;
+  const h = (v.heading + drift.heading) * D2R;
+  target.set(v.x, 0, -v.y);
+  const dir = new THREE.Vector3(-Math.sin(p) * Math.sin(h), Math.cos(p), Math.sin(p) * Math.cos(h));
+  camera.position.copy(target).addScaledVector(dir, dist);
+  camera.up.set(Math.sin(h), 0, -Math.cos(h));
+  camera.lookAt(target);
+  camera.near = Math.max(0.5, dist * 0.03);
+  camera.far = dist * 12 + 60000;
+  camera.updateProjectionMatrix();
+  camera.updateMatrixWorld();
+}
+
+const ray = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+
+/** point on the map plane (y=0) under a screen position, in map km */
+export function pickPlane(camera: THREE.Camera, ndcX: number, ndcY: number): [number, number] | null {
+  ray.setFromCamera(ndc.set(ndcX, ndcY), camera);
+  const t = -ray.ray.origin.y / ray.ray.direction.y;
+  if (!(t > 0)) return null;
+  const p = ray.ray.origin.clone().addScaledVector(ray.ray.direction, t);
+  return [p.x, -p.z];
+}
+
+/**
+ * Frame a set of map points inside the visible map, keeping the base view's angle.
+ * The view only ever pulls back or pans (never zooms in past the base), so a chapter's
+ * intended scale is kept while everything that happens in it stays in the picture.
+ * Margins are in pixels: [left, top, right, bottom].
+ */
+export function fitView(base: View, pts: [number, number][], w: number, h: number, fov: number, m: [number, number, number, number]): View {
+  if (!pts.length || w < 10 || h < 10) return base;
+  const cam = new THREE.PerspectiveCamera(fov, w / h, 1, 1e6);
+  const v = { ...base };
+  const q = new THREE.Vector3();
+  const sx0 = m[0], sy0 = m[1], sx1 = w - m[2], sy1 = h - m[3];
+  const sw = sx1 - sx0, sh = sy1 - sy0;
+  for (let it = 0; it < 12; it++) {
+    placeCamera(cam, v);
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const [x, y] of pts) {
+      q.set(x, 0, -y).project(cam);
+      if (q.z > 1) {
+        // behind the camera: pull back hard
+        x0 = -1e5; x1 = 1e5; y0 = -1e5; y1 = 1e5;
+        break;
+      }
+      const px = (q.x * 0.5 + 0.5) * w, py = (-q.y * 0.5 + 0.5) * h;
+      x0 = Math.min(x0, px); x1 = Math.max(x1, px);
+      y0 = Math.min(y0, py); y1 = Math.max(y1, py);
+    }
+    const bw = x1 - x0, bh = y1 - y0;
+    const k = Math.max(bw / sw, bh / sh);
+    let dx = 0, dy = 0;
+    if (k > 1 || bw > sw) dx = (x0 + x1) / 2 - (sx0 + sx1) / 2;
+    else if (x0 < sx0) dx = x0 - sx0;
+    else if (x1 > sx1) dx = x1 - sx1;
+    if (k > 1 || bh > sh) dy = (y0 + y1) / 2 - (sy0 + sy1) / 2;
+    else if (y0 < sy0) dy = y0 - sy0;
+    else if (y1 > sy1) dy = y1 - sy1;
+    if (k <= 1.002 && Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) break;
+    const c0 = pickPlane(cam, 0, 0);
+    const c1 = pickPlane(cam, ((w / 2 + dx) / w) * 2 - 1, -(((h / 2 + dy) / h) * 2 - 1));
+    if (c0 && c1) {
+      v.x += c1[0] - c0[0];
+      v.y += c1[1] - c0[1];
+    }
+    if (k > 1.002) v.dist *= Math.min(k * 1.03, 6);
+  }
+  return v;
 }

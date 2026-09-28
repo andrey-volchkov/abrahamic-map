@@ -1,26 +1,12 @@
 // Renderer, scene graph, post-processing and the frame loop.
 import * as THREE from 'three';
-import {
-  BloomEffect,
-  EffectComposer,
-  EffectPass,
-  KernelSize,
-  NoiseEffect,
-  RenderPass,
-  SMAAEffect,
-  TiltShiftEffect,
-  ToneMappingEffect,
-  ToneMappingMode,
-  VignetteEffect,
-  BlendFunction,
-} from 'postprocessing';
+import { EffectComposer, EffectPass, RenderPass, SMAAEffect } from 'postprocessing';
 import { CameraRig } from './camera';
 import { createNoiseTexture, createTerrainUniforms, hexToLinear } from './glsl';
+import { PAPER } from '../ui/palette';
 import { HeightField, type Level } from './assets';
 import { Terrain } from './terrain';
 import { Influence, createZoneUniforms, type Splat } from './influence';
-import { createSlab } from './slab';
-import { bakeShadows } from './shadowBake';
 
 export class Stage {
   renderer: THREE.WebGLRenderer;
@@ -34,9 +20,6 @@ export class Stage {
   terrain: Terrain;
   influence: Influence;
   light: Record<string, THREE.IUniform>;
-  tilt: TiltShiftEffect;
-  bloom: BloomEffect;
-  vignette: VignetteEffect;
   time = 0;
   private last = performance.now();
   private hooks: ((dt: number) => void)[] = [];
@@ -61,57 +44,35 @@ export class Stage {
     });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.NoToneMapping;
-    this.renderer.setClearColor(new THREE.Color('#0d0b09'));
-    this.scene.background = hexToLinear('#0f0d0b');
+    const paper = hexToLinear(PAPER);
+    this.renderer.setClearColor(new THREE.Color(PAPER));
+    this.scene.background = paper;
     this.dpr = Math.min(this.maxDpr, 1.5);
 
     const sun = new THREE.Vector3(-0.66, 0.52, -0.54).normalize();
     this.light = {
       uSunDir: { value: sun },
-      uSunColor: { value: new THREE.Color('#fff0dc').convertSRGBToLinear().multiplyScalar(1.2) },
-      uSkyColor: { value: new THREE.Color('#aebccb').convertSRGBToLinear().multiplyScalar(0.5) },
-      uGroundColor: { value: new THREE.Color('#8a7658').convertSRGBToLinear().multiplyScalar(0.3) },
       uNoise: { value: this.noise },
       uTime: { value: 0 },
       uCamDist: { value: 1000 },
-      uHaze: { value: new THREE.Color('#b9b3a6').convertSRGBToLinear().multiplyScalar(0.55) },
+      uPaper: { value: paper },
       uShadeExag: { value: 10 },
       uHearth: { value: [0, 1, 2, 3].map(() => new THREE.Vector4(0, 0, 1, 0)) },
       uFocus: { value: new THREE.Vector4(0, 0, 1, 0) },
-      uRivers: { value: 1 },
+      uGrat: { value: 5 },
     };
 
     this.terrain = new Terrain(this.tu, this.zu, this.light);
     this.scene.add(this.terrain.mesh);
-    this.scene.add(createSlab(this.tu, this.light));
     this.influence = new Influence(this.zu, 768);
 
+    // a printed page: no bloom, no depth-of-field blur, no grain — only anti-aliasing
     this.composer = new EffectComposer(this.renderer, { frameBufferType: THREE.HalfFloatType });
     this.composer.addPass(new RenderPass(this.scene, this.rig.camera));
-    this.bloom = new BloomEffect({
-      intensity: 1.1,
-      luminanceThreshold: 0.62,
-      luminanceSmoothing: 0.25,
-      mipmapBlur: true,
-      radius: 0.72,
-    });
-    this.tilt = new TiltShiftEffect({
-      offset: 0.02,
-      rotation: 0,
-      focusArea: 0.5,
-      feather: 0.32,
-      kernelSize: KernelSize.MEDIUM,
-    });
-    this.vignette = new VignetteEffect({ darkness: 0.62, offset: 0.28 });
-    const noise = new NoiseEffect({ premultiply: true, blendFunction: BlendFunction.SCREEN });
-    noise.blendMode.opacity.value = 0.035;
-    const tone = new ToneMappingEffect({ mode: ToneMappingMode.AGX });
-    this.composer.addPass(new EffectPass(this.rig.camera, this.bloom));
-    this.composer.addPass(new EffectPass(this.rig.camera, this.tilt));
-    this.composer.addPass(new EffectPass(this.rig.camera, tone, this.vignette, noise));
     this.composer.addPass(new EffectPass(this.rig.camera, new SMAAEffect()));
 
     this.resize();
+    new ResizeObserver(() => this.resize()).observe(canvas);
     window.addEventListener('resize', () => this.resize());
   }
 
@@ -121,9 +82,8 @@ export class Stage {
     const Rr = [u.uR0, u.uR1, u.uR2, u.uR3][slot], T = [u.uT0, u.uT1, u.uT2, u.uT3][slot];
     H.value = L.hTex;
     M.value = L.mTex;
-    // lake SDF (R) + baked soft shadows of the relief (G)
-    Lk.value = bakeShadows(this.renderer, L.hTex, L.lTex, L.W, L.H, L.k, this.light.uSunDir.value, [20, 13, 10, 8][slot]);
-    L.lTex.dispose();
+    // lake SDF (R)
+    Lk.value = L.lTex;
     Rr.value.set(L.x0, L.y0, L.W * L.k, L.H * L.k);
     T.value.set(1 / L.W, 1 / L.H, L.k);
     this.heights.add(L);
@@ -141,8 +101,11 @@ export class Stage {
   }
 
   resize() {
-    this.width = window.innerWidth;
-    this.height = window.innerHeight;
+    const w = Math.max(1, Math.round(this.canvas.clientWidth));
+    const h = Math.max(1, Math.round(this.canvas.clientHeight));
+    if (w === this.width && h === this.height && this.renderer.getPixelRatio() === this.dpr) return;
+    this.width = w;
+    this.height = h;
     this.renderer.setPixelRatio(this.dpr);
     this.renderer.setSize(this.width, this.height, false);
     this.composer.setSize(this.width, this.height, false);

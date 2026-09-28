@@ -5,9 +5,9 @@ import { project } from '../geo/projection';
 import type { Stage } from '../engine/stage';
 import { Ribbon, smoothPath } from '../engine/routes';
 import { Markers, type MarkerState } from '../engine/markers';
-import { Particles, type Particle } from '../engine/particles';
 import type { Splat } from '../engine/influence';
 import { dataUrl } from '../engine/assets';
+import { INK, RIVER, ROAD } from '../ui/palette';
 import type { Act, Chapter, EventItem, Hearth, Place, Religion, Route } from './types';
 
 import religionsJson from '../data/religions.json';
@@ -32,7 +32,7 @@ export const relById = new Map(religions.map((r) => [r.id, r]));
 export const eventById = new Map(events.map((e) => [e.id, e]));
 
 export function relColor(id: string): string {
-  return relById.get(id)?.color ?? '#cbbfa8';
+  return INK[id] ?? relById.get(id)?.color ?? INK.none;
 }
 
 interface ZoneEntry {
@@ -68,6 +68,8 @@ interface RouteView {
   ribbons: Ribbon[];
   paths: RoutePath[];
   color: string;
+  /** base ink line width, px */
+  width: number;
 }
 
 const CROSS = 24; // years for a colour change at one hearth
@@ -121,12 +123,8 @@ export class World {
 
   constructor(public stage: Stage) {
     const zoneColors: string[] = new Array(12).fill('#ffffff');
-    const zoneStyles: number[] = new Array(12).fill(0);
-    for (const r of religions) {
-      zoneColors[r.zone] = r.color;
-      zoneStyles[r.zone] = r.zone >= 8 ? 1 : 0;
-    }
-    stage.influence.setColors(zoneColors, zoneStyles);
+    for (const r of religions) zoneColors[r.zone] = relColor(r.id);
+    stage.influence.setColors(zoneColors);
     stage.splats = this.splats;
 
     const shared = {
@@ -135,7 +133,9 @@ export class World {
     };
     this.pxK = shared.uPxK;
     for (const r of routesData) {
-      const color = r.color ?? relColor(r.rel);
+      const color = r.rel === 'none' ? '#5a4636' : relColor(r.rel);
+      const road = r.kind === 'road';
+      const width = r.kind === 'road' ? 1.8 : r.arc ? 4 : 4.5;
       const lines = (r as Route & { lines?: [number, number][][] }).lines ?? [r.pts];
       const ribbons: Ribbon[] = [];
       const paths: RoutePath[] = [];
@@ -153,14 +153,14 @@ export class World {
           const step = r.arc ? Math.max(20, len / 80) : Math.max(2, Math.min(40, len / 300));
           const pts = r.arc ? arcSample(part, step) : smoothPath(part, step);
           const rb = new Ribbon([{ pts }], stage.tu, shared, {
-            color,
-            width: r.width ?? (r.kind === 'road' ? 1.6 : r.arc ? 2.2 : 2.6),
-            dash: r.dash ? 9 : r.kind === 'road' ? 0 : 0,
-            glow: r.kind === 'road' ? 0.2 : 1.1,
-            flow: r.kind === 'flow' || r.kind === 'forced' ? 0.6 : 0,
+            color: road ? ROAD : color,
+            width,
+            dash: r.dash ? 16 : 0,
             arc: r.arc ? Math.min(r.arc, len * 0.18) : 0,
             opacity: 0,
-            head: r.kind === 'road' ? 0 : 1,
+            casing: road ? 0 : 1.6,
+            arrow: road ? 0 : 7.5,
+            chev: road ? 0 : 120,
           });
           rb.mesh.visible = false;
           stage.scene.add(rb.mesh);
@@ -170,13 +170,11 @@ export class World {
           paths.push({ pts, cum, total: cum[cum.length - 1], arc: rb.material.uniforms.uArc.value as number });
         }
       }
-      this.routes.set(r.id, { data: r, ribbons, paths, color });
+      this.routes.set(r.id, { data: r, ribbons, paths, color, width });
     }
 
     this.markers = new Markers(stage.tu, { uTime: stage.light.uTime, uViewport: this.viewport, uPxK: this.pxK });
     stage.scene.add(this.markers.mesh);
-    this.particles = new Particles(this.viewport);
-    stage.scene.add(this.particles.mesh);
     this.loadRivers(shared);
   }
 
@@ -190,11 +188,9 @@ export class World {
       return { pts, rank: Math.max(1, l.r) };
     });
     this.rivers = new Ribbon(lines, this.stage.tu, shared, {
-      color: '#8fb4bb',
-      width: 1.5,
-      glow: 0,
-      opacity: 0.7,
-      head: 0,
+      color: RIVER,
+      width: 1.4,
+      opacity: 0.8,
       lift: 1.0,
     });
     this.rivers.mesh.renderOrder = 3;
@@ -202,59 +198,6 @@ export class World {
   }
 
   pxK: { value: number };
-  particles: Particles;
-  private plist: Particle[] = [];
-
-  /** particles streaming along visible routes */
-  updateParticles(time: number, dist: number, pxAt: (x: number, y: number) => number, hAt: (x: number, y: number) => number) {
-    const out = this.plist;
-    let n = 0;
-    const speed = dist * 0.045; // km per second, roughly screen-constant
-    const spacing = dist * 0.1;
-    for (const rv of this.routes.values()) {
-      if (rv.data.kind === 'road') continue;
-      const rb = rv.ribbons[0];
-      if (!rb) continue;
-      const op = rb.material.uniforms.uOpacity.value as number;
-      if (op < 0.3) continue;
-      const prog = rb.material.uniforms.uProgress.value as number;
-      const col = this.color(rv.color);
-      rv.paths.forEach((path) => {
-        const shown = path.total * prog;
-        if (shown < 1) return;
-        const k = Math.max(2, Math.min(16, Math.round(path.total / spacing)));
-        for (let i = 0; i < k; i++) {
-          const d = ((time * speed + (i / k) * path.total) % path.total + path.total) % path.total;
-          if (d > shown) continue;
-          // position along the polyline
-          let lo = 0, hi = path.cum.length - 1;
-          while (hi - lo > 1) {
-            const m = (lo + hi) >> 1;
-            if (path.cum[m] < d) lo = m;
-            else hi = m;
-          }
-          const seg = path.cum[hi] - path.cum[lo] || 1;
-          const f = (d - path.cum[lo]) / seg;
-          const x = path.pts[lo][0] + (path.pts[hi][0] - path.pts[lo][0]) * f;
-          const y = path.pts[lo][1] + (path.pts[hi][1] - path.pts[lo][1]) * f;
-          const t = d / path.total;
-          const h = path.arc > 0 ? path.arc * 4 * t * (1 - t) + 1 : hAt(x, y) + pxAt(x, y) * 2.5;
-          const edge = Math.min(1, t * 12, (1 - t) * 12, (shown - d) / Math.max(1, spacing * 0.3));
-          let p = out[n];
-          if (!p) p = out[n] = { x: 0, h: 0, y: 0, size: 0, color: col, alpha: 0 };
-          p.x = x;
-          p.h = h;
-          p.y = y;
-          p.size = rv.data.kind === 'journey' ? 9 : 11;
-          p.color = col;
-          p.alpha = Math.max(0, edge) * op * (rv.data.kind === 'journey' ? 0.65 : 0.9);
-          n++;
-        }
-      });
-    }
-    out.length = n;
-    this.particles.set(out);
-  }
   viewport = { value: new THREE.Vector2(1, 1) };
 
   color(hex: string) {
@@ -297,23 +240,34 @@ export class World {
     }
   }
 
-  /** set every route's visibility/progress. `focus` routes are drawn at full strength */
+  /** set every route's visibility/progress. `focus` routes are drawn at full strength,
+   * routes of earlier chapters stay as thin muted lines without arrows */
   updateRoutes(year: number, focus: Set<string>, mode: 'film' | 'free', dimOthers: Set<string>) {
+    const muted = new THREE.Color();
     for (const [id, rv] of this.routes) {
       const r = rv.data;
       const p = Math.max(0, Math.min(1, (year - r.from) / Math.max(0.001, r.to - r.from)));
       let op = 0;
       const alive = year >= r.from && year <= (r.until ?? 1e9);
+      const main = mode === 'free' ? alive : focus.has(id);
       if (mode === 'film') {
-        if (focus.has(id)) op = year >= r.from - 0.5 ? (year > r.to + 1.5 && r.to - r.from < 40 ? 0.5 : 1) : 0;
-        else if (dimOthers.has(id) && alive) op = 0.38;
-      } else if (alive) op = 0.8;
-      if (r.kind === 'road') op *= 0.55;
+        if (focus.has(id)) op = year >= r.from - 0.5 ? 1 : 0;
+        else if (dimOthers.has(id) && alive) op = 0.55;
+      } else if (alive) op = 0.9;
+      const road = r.kind === 'road';
+      if (road) op *= main ? 0.9 : 0.45;
+      const base = this.color(road ? ROAD : rv.color);
+      muted.copy(base).lerp(this.color('#b4a893'), main ? 0 : 0.55);
       for (const rb of rv.ribbons) {
-        const cur = rb.material.uniforms.uOpacity.value as number;
+        const u = rb.material.uniforms;
+        const cur = u.uOpacity.value as number;
         rb.opacity = cur + (op - cur) * 0.12;
         rb.progress = p;
-        rb.material.uniforms.uHead.value = focus.has(id) && p < 1 ? 1 : 0;
+        (u.uColor.value as THREE.Color).copy(muted);
+        u.uWidth.value = main ? rv.width : rv.width * (road ? 0.7 : 0.55);
+        u.uArrow.value = road ? 0 : main ? 7.5 : 4.5;
+        u.uChev.value = road || !main ? 0 : 120;
+        u.uCase.value = road ? (main ? 1 : 0) : main ? 1.6 : 1.1;
       }
     }
   }

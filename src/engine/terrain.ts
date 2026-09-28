@@ -53,23 +53,20 @@ in float vViewZ;
 out vec4 fragColor;
 
 uniform vec3 uSunDir;
-uniform vec3 uSunColor;
-uniform vec3 uSkyColor;
-uniform vec3 uGroundColor;
 uniform float uShadeExag;
 uniform float uTime;
 uniform float uCamDist;
-uniform vec3 uHaze;
 uniform vec4 uHearth[4];      // x, y, radius km, intensity
 uniform vec4 uFocus;          // x, y, radius km, strength
-uniform float uRivers;
+uniform float uGrat;          // graticule step in degrees (0 = off)
 uniform int uDebug;
 
 vec3 srgb(vec3 c) { return pow(c, vec3(2.2)); }
+vec3 hex(float r, float g, float b) { return srgb(vec3(r, g, b) / 255.0); }
 
-struct S { float h; vec2 g; float coast; float arid; float green; float lake; float hb; float k; float shade; vec2 gb; float sun; };
+struct S { float h; vec2 g; float coast; float arid; float green; float lake; float hb; float k; vec2 gb; };
 
-void samp(sampler2D H, sampler2D M, sampler2D L, vec4 R, vec3 T, vec2 p, float fp, float w, vec2 sunOff, inout S s) {
+void samp(sampler2D H, sampler2D M, sampler2D L, vec4 R, vec3 T, vec2 p, float fp, float w, inout S s) {
   vec2 uv = lvlUV(R, p);
   float k = T.z;
   float st = max(k, fp);
@@ -81,20 +78,16 @@ void samp(sampler2D H, sampler2D M, sampler2D L, vec4 R, vec3 T, vec2 p, float f
   float hn = textureLod(H, uv - dv, lod).r;
   float hs = textureLod(H, uv + dv, lod).r;
   vec3 m = textureLod(M, uv, lod).rgb;
-  vec2 lks = textureLod(L, uv, lod).rg;
+  float lks = textureLod(L, uv, lod).r;
   float hb = textureLod(H, uv, lod + 3.5).r;
-  // coast distance at a point offset towards the sun: land there shades the water here
-  float sh = textureLod(M, lvlUV(R, p + sunOff), lod).r;
   s.h += w * hc;
   s.g += w * vec2(hx1 - hx0, hn - hs) / (2.0 * st);
   s.coast += w * sdfKm(m.r, k);
   s.arid += w * m.g;
   s.green += w * m.b;
-  s.lake += w * sdfKm(lks.r, k);
-  s.sun += w * lks.g;
+  s.lake += w * sdfKm(lks, k);
   s.hb += w * hb;
   s.k += w * k;
-  s.shade += w * sdfKm(sh, k);
 }
 
 // smoothed bathymetry gradient (only evaluated for water pixels)
@@ -112,6 +105,27 @@ float noiseAt(vec2 p, float scaleKm, int ch) {
   return ch == 0 ? n.r : ch == 1 ? n.g : ch == 2 ? n.b : n.a;
 }
 
+// hypsometric tints in the Swiss manner: green lowlands, yellow and ochre uplands,
+// pale high mountains; dry lands start from sand instead of green
+vec3 hypsometric(float h, float arid, float alat) {
+  vec3 w0 = mix(hex(150.0, 190.0, 132.0), hex(170.0, 196.0, 148.0), smoothstep(15.0, 32.0, alat));
+  w0 = mix(w0, hex(176.0, 192.0, 160.0), smoothstep(50.0, 60.0, alat));
+  w0 = mix(w0, hex(206.0, 210.0, 196.0), smoothstep(62.0, 70.0, alat));
+  vec3 wet = w0;
+  wet = mix(wet, hex(198.0, 213.0, 160.0), smoothstep(0.0, 250.0, h));
+  wet = mix(wet, hex(226.0, 222.0, 170.0), smoothstep(250.0, 650.0, h));
+  wet = mix(wet, hex(233.0, 213.0, 160.0), smoothstep(650.0, 1200.0, h));
+  vec3 dry = hex(240.0, 228.0, 192.0);
+  dry = mix(dry, hex(238.0, 219.0, 174.0), smoothstep(0.0, 500.0, h));
+  dry = mix(dry, hex(230.0, 204.0, 152.0), smoothstep(500.0, 1200.0, h));
+  vec3 c = mix(wet, dry, smoothstep(0.15, 0.7, arid));
+  c = mix(c, hex(220.0, 189.0, 139.0), smoothstep(1200.0, 1900.0, h));
+  c = mix(c, hex(204.0, 170.0, 130.0), smoothstep(1900.0, 2700.0, h));
+  c = mix(c, hex(218.0, 204.0, 186.0), smoothstep(2700.0, 3600.0, h));
+  c = mix(c, hex(242.0, 239.0, 232.0), smoothstep(3600.0, 4800.0, h));
+  return c;
+}
+
 void main() {
   vec2 ol = eeOutline(vMap);
   if (ol.x < 0.0) discard;
@@ -120,164 +134,145 @@ void main() {
   vec2 dpx = dFdx(vMap), dpy = dFdy(vMap);
   float fp = max(length(dpx), length(dpy)); // km per pixel
 
-  vec4 w = levelWeights(vMap);
-  S s = S(0.0, vec2(0.0), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, vec2(0.0), 0.0);
-  vec2 sun2 = normalize(vec2(uSunDir.x, -uSunDir.z));
-  vec2 sunOff = sun2 * fp * 2.6;
-  if (w.x > 0.0) samp(uH0, uM0, uL0, uR0, uT0, vMap, fp, w.x, sunOff, s);
-  if (w.y > 0.0) samp(uH1, uM1, uL1, uR1, uT1, vMap, fp, w.y, sunOff, s);
-  if (w.z > 0.0) samp(uH2, uM2, uL2, uR2, uT2, vMap, fp, w.z, sunOff, s);
-  if (w.w > 0.0) samp(uH3, uM3, uL3, uR3, uT3, vMap, fp, w.w, sunOff, s);
+  vec4 w = levelWeightsFp(vMap, fp);
+  S s = S(0.0, vec2(0.0), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, vec2(0.0));
+  if (w.x > 0.0) samp(uH0, uM0, uL0, uR0, uT0, vMap, fp, w.x, s);
+  if (w.y > 0.0) samp(uH1, uM1, uL1, uR1, uT1, vMap, fp, w.y, s);
+  if (w.z > 0.0) samp(uH2, uM2, uL2, uR2, uT2, vMap, fp, w.z, s);
+  if (w.w > 0.0) samp(uH3, uM3, uL3, uR3, uT3, vMap, fp, w.w, s);
   if (s.coast < 3.0 * fp) {
     if (w.x > 0.0) s.gb += w.x * bathyGrad(uH0, uR0, uT0, vMap, fp);
     if (w.y > 0.0) s.gb += w.y * bathyGrad(uH1, uR1, uT1, vMap, fp);
     if (w.z > 0.0) s.gb += w.z * bathyGrad(uH2, uR2, uT2, vMap, fp);
-    if (w.w > 0.0) s.gb += w.w * bathyGrad(uH3, uR3, uT3, vMap, fp);
+    // the finest level's bathymetry comes from other tiles and does not match its
+    // neighbours: the sea takes L2's depths there
+    if (w.w > 0.0) s.gb += w.w * bathyGrad(uH2, uR2, uT2, vMap, fp);
   }
+  float hSea = s.h;
+  if (w.w > 0.0 && s.coast < 3.0 * fp) hSea = mix(s.h, textureLod(uH2, lvlUV(uR2, vMap), log2(max(fp / uT2.z, 1.0))).r, w.w);
   // SDFs are clamped to ±8 texels; beyond ~3 texels per pixel they lose meaning
   float fpc = min(fp, 3.0 * s.k);
   float sdfValid = 1.0 - smoothstep(1.5 * s.k, 3.0 * s.k, fp);
 
-  vec3 V = normalize(cameraPosition - vWorld);
   vec3 L = normalize(uSunDir);
+  vec3 ink = hex(52.0, 42.0, 32.0);
 
-  // ---- land ---------------------------------------------------------------
+  // ---- land: albedo -------------------------------------------------------
   float es = uShadeExag;
   vec3 N = normalize(vec3(-s.g.x * 0.001 * es, 1.0, s.g.y * 0.001 * es));
-  // fine "plaster" grain, scale-adaptive so it never swims
+  // fine grain, scale-adaptive so it never swims
   float gl = log2(fp * 90.0);
   float gf = floor(gl);
   float gt = gl - gf;
   vec2 gp1 = vMap / exp2(gf), gp2 = vMap / exp2(gf + 1.0);
   vec2 grain = mix(texture(uNoise, gp1 * 0.37).rg, texture(uNoise, gp2 * 0.37).rg, gt) - 0.5;
-  N = normalize(N + vec3(grain.x, 0.0, grain.y) * 0.05);
+  N = normalize(N + vec3(grain.x, 0.0, grain.y) * 0.03);
 
   float h = s.h;
   float alat = abs(lat);
   float arid = clamp(s.arid, 0.0, 1.0);
-  arid = clamp(arid + (noiseAt(vMap, 1400.0, 0) - 0.5) * 0.35 * arid, 0.0, 1.0);
+  arid = clamp(arid + (noiseAt(vMap, 1400.0, 0) - 0.5) * 0.3 * arid, 0.0, 1.0);
   float irrig = s.green * arid;
 
-  vec3 cTemperate = srgb(vec3(0.55, 0.58, 0.44));
-  vec3 cTropic = srgb(vec3(0.40, 0.48, 0.33));
-  vec3 cBoreal = srgb(vec3(0.45, 0.49, 0.41));
-  vec3 cTundra = srgb(vec3(0.62, 0.61, 0.55));
-  vec3 cSteppe = srgb(vec3(0.69, 0.65, 0.50));
-  vec3 cDesert = srgb(vec3(0.79, 0.70, 0.54));
-  vec3 cHigh = srgb(vec3(0.62, 0.55, 0.45));
-  vec3 cRock = srgb(vec3(0.55, 0.51, 0.47));
-  vec3 cSnow = srgb(vec3(0.95, 0.94, 0.91));
-  vec3 cIrrig = srgb(vec3(0.44, 0.52, 0.30));
-
-  vec3 wet = mix(cTropic, cTemperate, smoothstep(12.0, 30.0, alat));
-  wet = mix(wet, cBoreal, smoothstep(48.0, 58.0, alat));
-  wet = mix(wet, cTundra, smoothstep(62.0, 70.0, alat));
-  vec3 col = mix(wet, cSteppe, smoothstep(0.0, 0.6, arid));
-  col = mix(col, cDesert, smoothstep(0.4, 1.0, arid));
-  // elevation tint
-  float hi = smoothstep(700.0, 2600.0, h);
-  col = mix(col, mix(cHigh, cRock, smoothstep(2500.0, 4200.0, h)), hi * 0.85);
+  vec3 col = hypsometric(h, arid, alat);
   // irrigated river valleys in dry lands
-  col = mix(col, cIrrig, smoothstep(0.25, 0.8, irrig) * 0.85);
-  // noise mottling
+  col = mix(col, hex(163.0, 196.0, 134.0), smoothstep(0.25, 0.8, irrig) * 0.9);
+  // faint mottling, like pigment on paper
   float mott = noiseAt(vMap, 900.0, 1) * 0.6 + noiseAt(vMap, 260.0, 2) * 0.4;
-  col *= 0.92 + 0.16 * mott;
+  col *= 0.97 + 0.06 * mott;
   // snow & ice: snowline falls with latitude
   float snowline = mix(4800.0, 0.0, smoothstep(30.0, 72.0, alat));
   float slope = 1.0 - N.y;
   float snow = smoothstep(snowline, snowline + 700.0, h + noiseAt(vMap, 120.0, 3) * 500.0) * (1.0 - smoothstep(0.35, 0.8, slope));
   snow = max(snow, smoothstep(66.0, 72.0, alat) * step(lat, 0.0)); // Antarctica
   snow = max(snow, smoothstep(1300.0, 2200.0, h) * smoothstep(60.0, 70.0, alat) * 0.55);
-  col = mix(col, cSnow, clamp(snow, 0.0, 1.0));
+  col = mix(col, hex(250.0, 250.0, 247.0), clamp(snow, 0.0, 1.0));
 
-  // lighting
-  float ndl = dot(N, L);
-  float diff = clamp((ndl + 0.18) / 1.18, 0.0, 1.0) * mix(1.0, s.sun, 0.8);
-  float cav = clamp(1.0 + (h - s.hb) * 0.00045 * es / 12.0, 0.72, 1.12);
-  vec3 amb = mix(uGroundColor, uSkyColor, N.y * 0.5 + 0.5);
-  vec3 land = col * (amb * cav + uSunColor * diff * mix(1.0, cav, 0.5));
-  // soft sheen on snow
-  vec3 Hh = normalize(L + V);
-  land += uSunColor * pow(max(dot(N, Hh), 0.0), 24.0) * 0.05 * (0.3 + snow);
-
-  // lakes
   float lakeCov = clamp(0.5 + s.lake / fpc, 0.0, 1.0);
+  float cover = clamp(0.5 + s.coast / max(fpc, 1e-3), 0.0, 1.0);
+
+
+  // ---- land: Swiss relief shading ----------------------------------------
+  // flat ground keeps its tint; slopes facing the NW light warm up and lighten,
+  // slopes turned away fall into a soft bluish shadow
+  float ndl = dot(N, L);
+  float rel = (ndl - L.y) * 0.95;
+  float cav = clamp((h - s.hb) * 0.00035 * es / 12.0, -0.18, 0.08);
+  float shadow = clamp(-rel - cav, 0.0, 0.7);
+  float lit = clamp(rel, 0.0, 0.5);
+  vec3 shadowTint = hex(122.0, 138.0, 178.0);
+  vec3 shadeF = mix(vec3(1.0), shadowTint, smoothstep(0.0, 0.8, shadow));
+  vec3 land = mix(col * shadeF, hex(255.0, 251.0, 236.0), lit * 0.4);
+  // grey shading factor for the colour overlays: they keep their hue, the relief reads through
+  float shadeL = dot(shadeF, vec3(0.2126, 0.7152, 0.0722)) + lit * 0.15;
+
+  // ---- zones of influence: flat atlas tints laid over the shaded relief ---
+  land = applyZones(land, vMap, fp, cover * (1.0 - lakeCov), mix(1.0, shadeL, 0.5));
 
   // ---- water --------------------------------------------------------------
-  float depth = max(-h, 0.0);
-  vec3 cShelf = srgb(vec3(0.50, 0.65, 0.64));
-  vec3 cShallow = srgb(vec3(0.33, 0.50, 0.53));
-  vec3 cDeep = srgb(vec3(0.17, 0.29, 0.35));
-  vec3 cAbyss = srgb(vec3(0.12, 0.21, 0.27));
-  vec3 wc = mix(cShelf, cShallow, smoothstep(0.0, 320.0, depth));
-  wc = mix(wc, cDeep, smoothstep(150.0, 2600.0, depth));
-  wc = mix(wc, cAbyss, smoothstep(3000.0, 6000.0, depth));
-  // bathymetric relief faintly visible through the resin
+  float depth = max(-hSea, 0.0);
+  vec3 wc = hex(214.0, 232.0, 236.0);
+  wc = mix(wc, hex(195.0, 222.0, 232.0), smoothstep(10.0, 180.0, depth));
+  wc = mix(wc, hex(170.0, 204.0, 222.0), smoothstep(150.0, 2000.0, depth));
+  wc = mix(wc, hex(150.0, 188.0, 212.0), smoothstep(2500.0, 5500.0, depth));
+  // bathymetric relief, barely there
   vec3 Nb = normalize(vec3(-s.gb.x * 0.001 * es * 0.12, 1.0, s.gb.y * 0.001 * es * 0.12));
-  wc *= 0.93 + 0.12 * clamp(dot(Nb, L), 0.0, 1.0);
-  // ripples (scale-adaptive, two octaves cross-faded)
-  float rl = log2(fp * 70.0);
-  float rf = floor(rl);
-  float rt = rl - rf;
-  vec2 q1 = vMap / exp2(rf), q2 = vMap / exp2(rf + 1.0);
-  vec2 drift = vec2(uTime * 0.013, uTime * 0.008);
-  vec2 rn1 = texture(uNoise, q1 * 0.21 + drift).ba - texture(uNoise, q1 * 0.13 - drift * 0.7).ba;
-  vec2 rn2 = texture(uNoise, q2 * 0.21 + drift).ba - texture(uNoise, q2 * 0.13 - drift * 0.7).ba;
-  vec2 rn = mix(rn1, rn2, rt);
-  float ramp = mix(0.03, 0.006, smoothstep(1.0, 20.0, fp));
-  vec3 Nw = normalize(vec3(rn.x * ramp, 1.0, rn.y * ramp));
-  float fres = 0.02 + 0.98 * pow(1.0 - max(dot(Nw, V), 0.0), 5.0);
-  vec3 Hw = normalize(L + V);
-  float nh = max(dot(Nw, Hw), 0.0);
-  float spec = pow(nh, 320.0) * 2.2 + pow(nh, 60.0) * 0.07 + pow(nh, 12.0) * 0.012;
-  vec3 water = wc * (uSkyColor * 0.55 + uSunColor * 0.42 * max(dot(vec3(0,1,0), L), 0.0));
-  water = mix(water, uSkyColor * 1.05, fres * 0.4);
-  water += uSunColor * spec;
-
-  // coastline: a thin pale lip, and faint engraved lines offshore
+  wc *= 0.97 + 0.05 * clamp((dot(Nb, L) - L.y) * 4.0 + 0.5, 0.0, 1.0);
   float cd = -s.coast; // km offshore
-  // the land plate casts a narrow shadow onto the resin sea
-  float shadowed = smoothstep(-0.6 * fpc, 0.6 * fpc, s.shade) * sdfValid;
-  water *= 1.0 - 0.32 * shadowed;
-  float lip = (1.0 - smoothstep(0.0, 1.3 * fp, cd)) * sdfValid;
-  water = mix(water, srgb(vec3(0.80, 0.82, 0.76)) * (uSkyColor + uSunColor * 0.5), lip * 0.45);
-  float spacing = max(fp * 7.0, 0.8);
+  // coastal tint and engraved water lines (a nineteenth-century atlas habit)
+  vec3 lineCol = hex(92.0, 142.0, 176.0);
+  float band = (1.0 - smoothstep(0.0, 9.0 * fp, cd)) * sdfValid;
+  wc = mix(wc, hex(160.0, 200.0, 222.0), band * 0.55);
+  float spacing = max(fp * 5.0, 0.6);
   float line = abs(fract(cd / spacing - 0.5) - 0.5) * spacing / fp;
-  float lines = (1.0 - smoothstep(0.35, 1.1, line)) * (1.0 - smoothstep(spacing * 0.6, spacing * 3.2, cd)) * step(spacing * 0.5, cd);
-  water = mix(water, water * 1.16 + 0.008, lines * 0.3 * sdfValid);
+  float lines = (1.0 - smoothstep(0.3, 0.9, line)) * (1.0 - smoothstep(spacing * 0.8, spacing * 3.4, cd)) * step(spacing * 0.5, cd);
+  vec3 water = mix(wc, lineCol, lines * 0.35 * sdfValid);
 
-  // lakes use the water shading at their own level
-  vec3 lakeCol = mix(cShallow, cShelf, 0.35) * (uSkyColor * 0.6 + uSunColor * 0.4) + uSunColor * spec * 0.6;
+  // lakes
+  vec3 lakeCol = hex(190.0, 219.0, 231.0);
   land = mix(land, lakeCol, lakeCov);
+  float lakeEdge = (1.0 - smoothstep(0.35 * fp, 1.1 * fp, abs(s.lake))) * sdfValid;
+  land = mix(land, lineCol * 0.8, lakeEdge * 0.7);
 
-  // rivers are drawn as vector lines; here only a hint at far zoom
-  float cover = clamp(0.5 + s.coast / max(fpc, 1e-3), 0.0, 1.0);
   vec3 c = mix(water, land, cover);
+  // coastline: a crisp ink line
+  float coastLine = 1.0 - smoothstep(0.35 * fp, 1.05 * fp, abs(s.coast));
+  c = mix(c, hex(58.0, 96.0, 128.0), coastLine * mix(0.45, 0.85, sdfValid));
 
-  // ---- zones of influence -------------------------------------------------
-  c = applyZones(c, vMap, fp, cover * (1.0 - lakeCov), uTime);
+  // ---- graticule ----------------------------------------------------------
+  if (uGrat > 0.0) {
+    float lon = eeLon(vMap);
+    float gLat = abs(fract(lat / uGrat + 0.5) - 0.5) * uGrat / max(fwidth(lat), 1e-5);
+    float gLon = abs(fract(lon / uGrat + 0.5) - 0.5) * uGrat / max(fwidth(lon), 1e-5);
+    float g = 1.0 - smoothstep(0.35, 1.1, min(gLat, gLon));
+    c = mix(c, mix(hex(110.0, 96.0, 78.0), lineCol, 1.0 - cover), g * mix(0.16, 0.3, 1.0 - cover));
+  }
 
-  // ---- hearths (glowing memory of earlier acts) ---------------------------
-  vec3 glow = vec3(0.0);
+  // ---- earlier acts: a ruled circle, as on an inset map --------------------
   for (int i = 0; i < 4; i++) {
     vec4 hh = uHearth[i];
     if (hh.w <= 0.0) continue;
-    float d = distance(vMap, hh.xy) / hh.z;
-    glow += srgb(vec3(1.0, 0.72, 0.36)) * hh.w * (exp(-d * d * 3.0) * 0.55 + exp(-d * d * 16.0) * 1.9 + exp(-d * d * 90.0) * 2.5);
+    float d = distance(vMap, hh.xy);
+    float ringPx = abs(d - hh.z) / fp;
+    float ring = 1.0 - smoothstep(0.8, 1.8, ringPx);
+    float ring2 = 1.0 - smoothstep(0.4, 1.1, abs(d - hh.z - 4.0 * fp) / fp);
+    c = mix(c, hex(150.0, 40.0, 28.0), (ring + ring2 * 0.7) * hh.w);
+    c = mix(c, c * hex(255.0, 228.0, 205.0), (1.0 - smoothstep(hh.z * 0.95, hh.z, d)) * hh.w * 0.6);
   }
-  c += glow;
 
-  // ---- focus (soft spotlight on the table) --------------------------------
+  // ---- focus: the rest of the map recedes towards the paper ---------------
   if (uFocus.w > 0.0) {
     float fd = distance(vMap, uFocus.xy) / uFocus.z;
-    c *= mix(1.0, 0.55 + 0.45 * (1.0 - smoothstep(0.7, 1.9, fd)), uFocus.w);
+    float out_ = smoothstep(0.8, 1.9, fd) * uFocus.w;
+    float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    c = mix(c, mix(vec3(lum), uPaper, 0.55), out_ * 0.6);
   }
 
-  // ---- slab edge bevel & aerial haze -------------------------------------
-  float edge = 1.0 - smoothstep(0.0, 2.2 * fp, ol.x);
-  c = mix(c, c * 1.35 + 0.02, edge * 0.8);
-  float haze = smoothstep(uCamDist * 0.8, uCamDist * 3.2, vViewZ);
-  c = mix(c, uHaze, haze * 0.32);
+  // ---- neatline of the projection and aerial perspective ------------------
+  float edge = 1.0 - smoothstep(0.6 * fp, 1.8 * fp, ol.x);
+  c = mix(c, ink, edge * 0.85);
+  float haze = smoothstep(uCamDist * 0.9, uCamDist * 3.4, vViewZ);
+  c = mix(c, uPaper, haze * 0.35);
 
   if (uDebug == 1) c = vec3(max(h, 0.0) / 3000.0, max(-h, 0.0) / 6000.0, 0.0);
   if (uDebug == 2) c = w.rgb + vec3(w.w);

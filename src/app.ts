@@ -3,16 +3,16 @@
 import * as THREE from 'three';
 import { Stage } from './engine/stage';
 import { loadLevel, loadMeta, type Level } from './engine/assets';
-import { viewFromSpec, type View } from './engine/camera';
+import { fitView, viewFromSpec, type View } from './engine/camera';
 import { project } from './geo/projection';
-import { World, acts, chapters, events, eventById, places, relById, relColor, religions } from './story/world';
+import { World, acts, chapters, events, eventById, relById, relColor, religions } from './story/world';
 import { MapControls } from './story/controls';
 import type { MarkerState } from './engine/markers';
 import { LabelLayer, type LabelItem } from './ui/labels';
-import { About, ActTitle, Caption, Counter, FilmBar, Header, Intro, Legend, Panel, Timeline, YearDisplay } from './ui/components';
+import { About, ActTitle, Caption, Counter, FilmBar, FreeSheet, Header, Intro, Layout, Legend, Panel, Sheets, Timeline, YearDisplay } from './ui/components';
 import { el, esc } from './ui/dom';
 import { animCfg } from './ui/anim';
-import { fmtYear } from './story/format';
+import { PAPER } from './ui/palette';
 import counterJson from './data/counter.json';
 import type { Act, Chapter, EventItem } from './story/types';
 
@@ -22,6 +22,10 @@ const byYear = events.slice().sort((a, b) => a.year - b.year);
 const REDUCED = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 const zoneToRel = new Map(religions.map((r) => [r.zone, r.id]));
 const ease = (t: number) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+
+/** screen margins (px) kept around a chapter's events when framing: left, top, right, bottom */
+const FRAME_MARGIN: [number, number, number, number] = [56, 60, 56, 48];
+const RIPPLE_LIFE = 1.8;
 
 export class App {
   stage: Stage;
@@ -42,13 +46,19 @@ export class App {
   private chapterEvents = new Set<string>();
   private seenEvents = new Map<string, number>();
   private levelsReady = { L0: false, L1: false, L2: false, L3: false };
-  private titleOn = false;
+  private ripples: { x: number; y: number; c: THREE.Color; t0: number }[] = [];
+  private lastZoneYear = NaN;
+  private pointCache = new Map<string, [number, number][]>();
+  private muted = new Map<string, THREE.Color>();
   controls: MapControls;
 
+  layout: Layout;
+  sheets: Sheets;
   header: Header;
   yearEl: YearDisplay;
   caption: Caption;
   actTitle: ActTitle;
+  freeSheet: FreeSheet;
   filmBar: FilmBar;
   timeline: Timeline;
   panel: Panel;
@@ -61,26 +71,31 @@ export class App {
 
   constructor() {
     const canvas = document.getElementById('scene') as HTMLCanvasElement;
+    this.layout = new Layout(this.ui);
+    this.layout.setMode('intro');
     this.stage = new Stage(canvas);
     (window as unknown as { stage: Stage; app: App }).stage = this.stage;
     (window as unknown as { app: App }).app = this;
 
+    const L = this.layout;
     this.labels = new LabelLayer(this.ui);
-    this.caption = new Caption(this.ui);
-    this.header = new Header(this.ui);
-    this.yearEl = new YearDisplay(this.ui);
-    this.counter = new Counter(this.ui, counterJson.label, counterJson.points, counterJson.note);
-    this.legend = new Legend(this.ui);
-    this.filmBar = new FilmBar(this.ui, chapters, acts);
-    this.timeline = new Timeline(this.ui, acts, events);
-    this.actTitle = new ActTitle(this.ui);
-    this.panel = new Panel(this.ui);
+    this.yearEl = new YearDisplay(L.yearRow);
+    this.counter = new Counter(L.yearRow, counterJson.label, counterJson.points, counterJson.note);
+    this.sheets = new Sheets(L.body);
+    this.intro = new Intro(this.sheets);
+    this.actTitle = new ActTitle(this.sheets);
+    this.caption = new Caption(this.sheets);
+    this.freeSheet = new FreeSheet(this.sheets);
+    this.panel = new Panel(L.body);
+    this.legend = new Legend(L.legendRow);
+    this.filmBar = new FilmBar(L.foot, chapters, acts);
+    this.timeline = new Timeline(L.foot, acts, events);
+    this.header = new Header(L.head, L.foot);
     this.about = new About(this.ui);
     this.ui.append(this.tooltip);
-    this.intro = new Intro(this.ui);
 
     this.filmBar.show(false);
-    this.yearEl.root.style.opacity = '0';
+    this.yearEl.show(false);
     this.header.show(false);
 
     this.header.onMode = (m) => (m === 'film' ? this.enterFilm() : this.enterFree());
@@ -139,7 +154,7 @@ export class App {
 
   async boot() {
     const s = this.stage;
-    s.rig.set({ ...viewFromSpec({ lon: 36.8, lat: 30.2, dist: 3600, pitch: 44, heading: -18 }) });
+    s.rig.set({ ...viewFromSpec({ lon: 36.8, lat: 31.4, dist: 3000, pitch: 40, heading: -12 }) });
     s.start();
     const meta = await loadMeta();
     this.intro.progress(0.08, 'Загрузка рельефа мира');
@@ -172,13 +187,12 @@ export class App {
   enterFilm(fromIntro = false) {
     const prev = this.mode;
     this.mode = 'film';
+    this.layout.setMode('film');
     this.header.setMode('film');
     this.controls.enabled = false;
     this.timeline.show(false);
     this.filmBar.show(true);
     this.yearEl.show(true);
-    this.stage.tilt.focusArea = 0.5;
-    this.stage.tilt.feather = 0.3;
     this.free.playing = false;
     if (fromIntro || prev === 'intro' || this.film.i < 0) this.go(0);
     else this.go(this.film.i);
@@ -186,19 +200,15 @@ export class App {
 
   enterFree() {
     this.mode = 'free';
+    this.layout.setMode('free');
     this.film.token++;
-    this.titleOn = false;
     this.header.setMode('free');
     this.controls.enabled = true;
     this.filmBar.show(false);
     this.timeline.show(true);
-    this.caption.hide(true);
-    this.actTitle.hideNow();
+    this.freeSheet.show();
     this.yearEl.show(true);
     this.stage.rig.cancelFlight();
-    this.stage.rig.shift = 0;
-    this.stage.tilt.focusArea = 0.78;
-    this.stage.tilt.feather = 0.3;
     this.yearTween = null;
     if (this.film.i < 0) this.stage.rig.flyTo(viewFromSpec(acts[0].view));
   }
@@ -215,6 +225,42 @@ export class App {
 
   private tweenYear(to: number, dur: number) {
     this.yearTween = { from: this.year, to, t: 0, dur: Math.max(0.01, dur * animCfg.scale) };
+  }
+
+  // ------------------------------------------------------------------ framing
+  /** map points that must stay in the picture during a chapter */
+  private chapterPoints(ch: Chapter): [number, number][] {
+    let pts = this.pointCache.get(ch.id);
+    if (pts) return pts;
+    pts = [];
+    for (const id of ch.events ?? []) {
+      const e = eventById.get(id);
+      if (e) pts.push(project(e.lon, e.lat));
+    }
+    for (const rid of ch.routes ?? []) {
+      const rv = this.world.routes.get(rid);
+      if (!rv || rv.data.kind === 'road') continue;
+      for (const path of rv.paths) {
+        const step = Math.max(1, Math.floor(path.pts.length / 24));
+        for (let i = 0; i < path.pts.length; i += step) pts.push(path.pts[i]);
+        pts.push(path.pts[path.pts.length - 1]);
+      }
+    }
+    if (ch.focus) {
+      const [fx, fy] = project(ch.focus.lon, ch.focus.lat);
+      const r = ch.focus.r * 0.8;
+      pts.push([fx - r, fy], [fx + r, fy], [fx, fy - r], [fx, fy + r]);
+    }
+    this.pointCache.set(ch.id, pts);
+    return pts;
+  }
+
+  /** the chapter's view, pulled back or panned so all its events sit inside the map frame */
+  private chapterView(ch: Chapter, second = false): View | null {
+    const spec = second ? ch.view2 : ch.view;
+    if (!spec) return null;
+    const s = this.stage;
+    return fitView(viewFromSpec(spec), this.chapterPoints(ch), s.width, s.height, s.rig.camera.fov, FRAME_MARGIN);
   }
 
   // ------------------------------------------------------------------ film
@@ -234,37 +280,40 @@ export class App {
     this.chapterEvents = new Set(ch.events ?? []);
     const rig = this.stage.rig;
     const actChange = !prev || prev.act !== ch.act;
-    if (!actChange) {
-      this.titleOn = false;
-      this.actTitle.hideNow();
-    }
-    this.caption.hide(actChange);
     if (actChange) {
-      this.titleOn = true;
-      const title = this.actTitle.show(act, prev ? 2.6 : 2.2).then(() => {
-        if (token === this.film.token) this.titleOn = false;
-      });
+      // the old text leaves, the act title takes the column while the camera travels
+      const title = this.actTitle.show(act, prev ? 2.6 : 2.2);
       if (prev && prev.act < ch.act) {
-        // the grand pull-back: the previous act shrinks into a glowing point
+        // the grand pull-back: the previous act shrinks into a ringed inset
         this.tweenYear(ch.years[0], 7);
         await rig.flyTo(viewFromSpec(act.view), { duration: 7.5 });
       } else {
         this.tweenYear(ch.years[0], 4);
-        await rig.flyTo(viewFromSpec(ch.view), { duration: prev ? 5 : 6.5 });
+        await rig.flyTo(this.chapterView(ch) as View, { duration: prev ? 5 : 6.5 });
       }
       await title;
       if (token !== this.film.token) return;
+    } else {
+      this.sheets.show(null);
     }
-    const target = viewFromSpec(ch.view);
-    const p = rig.flyTo(target, { speed: 1.05 });
+    const p = rig.flyTo(this.chapterView(ch) as View, { speed: 1.05 });
     if (!actChange) this.tweenYear(ch.years[0], 1.6);
     await p;
     if (token !== this.film.token) return;
-    const idx = chapters.filter((c) => c.act === ch.act).indexOf(ch) + 1;
-    const n = chapters.filter((c) => c.act === ch.act).length;
-    this.caption.show(ch, `Акт ${act.roman} · глава ${idx} из ${n}${(ch.events ?? []).length ? ' · <b>точки на карте открывают подробности</b>' : ''}`);
+    this.showCaption(ch);
     this.film.phase = 'play';
-    if (ch.view2) rig.flyTo(viewFromSpec(ch.view2), { duration: (ch.dur ?? 16) + 4 });
+    const v2 = this.chapterView(ch, true);
+    if (v2) rig.flyTo(v2, { duration: (ch.dur ?? 16) + 4 });
+  }
+
+  private showCaption(ch: Chapter) {
+    const act = acts[ch.act - 1];
+    const list = chapters.filter((c) => c.act === ch.act);
+    const meta = `Акт ${act.roman} · глава ${list.indexOf(ch) + 1} из ${list.length}`;
+    const hints: string[] = [];
+    if ((ch.events ?? []).length) hints.push('Точки на карте открывают подробности.');
+    if (chapters.indexOf(ch) === 0) hints.push('Колесо мыши или ← → листают главы.');
+    this.caption.show(ch, meta, hints.join(' '));
   }
 
   /** jump straight into a chapter state (for screenshots and deep links) */
@@ -272,7 +321,9 @@ export class App {
     const ch = chapters[i];
     if (!ch) return;
     this.mode = 'film';
+    this.layout.setMode('film');
     this.header.setMode('film');
+    this.header.show(true);
     this.controls.enabled = false;
     this.timeline.show(false);
     this.filmBar.show(true);
@@ -282,16 +333,13 @@ export class App {
     this.film.phase = 'play';
     this.film.t = (ch.dur ?? 16) * frac;
     this.year = ch.years[0] + (ch.years[1] - ch.years[0]) * ease(Math.min(1, frac / 0.82));
+    this.lastZoneYear = NaN;
     this.setPlaying(false);
     this.chapterEvents = new Set(ch.events ?? []);
     for (const id of ch.events ?? []) this.seenEvents.set(id, -10);
-    this.stage.rig.set(viewFromSpec(ch.view));
-    this.stage.rig.shift = window.innerWidth > 820 ? 0.13 : 0;
-    const act = acts[ch.act - 1];
-    this.header.setAct(act);
-    const idx = chapters.filter((c) => c.act === ch.act).indexOf(ch) + 1;
-    const n = chapters.filter((c) => c.act === ch.act).length;
-    this.caption.show(ch, `Акт ${act.roman} · глава ${idx} из ${n}`);
+    this.stage.rig.set(this.chapterView(ch) as View);
+    this.header.setAct(acts[ch.act - 1]);
+    this.showCaption(ch);
   }
 
   private filmTick(dt: number) {
@@ -329,11 +377,11 @@ export class App {
     if (!e) return;
     const same = byYear.filter((x) => x.act === e.act);
     const k = same.indexOf(e);
-    this.panel.show(e, same[k - 1] ?? null, same[k + 1] ?? null);
     if (this.mode === 'film') {
       if (!this.panel.open || !this.resumeAfterPanel) this.resumeAfterPanel = this.resumeAfterPanel || this.film.playing;
       this.setPlaying(false);
     }
+    this.panel.show(e, same[k - 1] ?? null, same[k + 1] ?? null);
     if (fly && this.mode === 'free') {
       const [x, y] = project(e.lon, e.lat);
       const v = this.stage.rig.view;
@@ -343,9 +391,11 @@ export class App {
   }
 
   private hoverAt(x: number, y: number) {
+    const r = this.stage.canvas.getBoundingClientRect();
+    const lx = x - r.left, ly = y - r.top;
     let best: string | null = null, bd = 16;
     for (const p of this.screenPts) {
-      const d = Math.hypot(p.x - x, p.y - y);
+      const d = Math.hypot(p.x - lx, p.y - ly);
       if (d < bd) {
         bd = d;
         best = p.id;
@@ -353,17 +403,22 @@ export class App {
     }
     this.hover = best;
     this.stage.canvas.style.cursor = best ? 'pointer' : this.mode === 'free' ? 'grab' : 'default';
+    const place = () => {
+      const w = this.tooltip.offsetWidth;
+      const tx = x + 16 + w > window.innerWidth - 8 ? x - 16 - w : x + 16;
+      this.tooltip.style.transform = `translate(${tx}px, ${y + 14}px)`;
+    };
     if (best) {
       const e = eventById.get(best) as EventItem;
       this.tooltip.innerHTML = `<small>${esc(e.date)}</small>${esc(e.title)}`;
-      this.tooltip.style.transform = `translate(${x + 14}px, ${y + 12}px)`;
+      place();
       this.tooltip.classList.add('on');
       return;
     }
     const zone = this.mode === 'free' ? this.zoneAt(x, y) : null;
     if (zone) {
       this.tooltip.innerHTML = zone;
-      this.tooltip.style.transform = `translate(${x + 14}px, ${y + 12}px)`;
+      place();
       this.tooltip.classList.add('on');
     } else this.tooltip.classList.remove('on');
   }
@@ -385,11 +440,11 @@ export class App {
     const parts: string[] = [];
     if (bi >= 0) {
       const q = name(bi)!;
-      parts.push(`<small>зона влияния</small>${esc(q.name)}${q.note ? `<br><span style="color:var(--ink-3);font-size:12px">${esc(q.note)}</span>` : ''}`);
+      parts.push(`<small>зона влияния</small>${esc(q.name)}${q.note ? `<div class="note">${esc(q.note)}</div>` : ''}`);
     }
     if (hi >= 0) {
       const q = name(hi)!;
-      parts.push(`<small>${bi >= 0 ? 'и одновременно' : 'зона'}</small>${esc(q.name)}${q.note ? `<br><span style="color:var(--ink-3);font-size:12px">${esc(q.note)}</span>` : ''}`);
+      parts.push(`<small>${bi >= 0 ? 'и одновременно' : 'зона'}</small>${esc(q.name)}${q.note ? `<div class="note">${esc(q.note)}</div>` : ''}`);
     }
     return parts.length ? parts.join('<div style="height:8px"></div>') : null;
   }
@@ -424,6 +479,20 @@ export class App {
     return y < 400 ? acts[0] : y < 1492 ? (this.stage.rig.view.dist > 3600 || y > 751 ? acts[1] : acts[0]) : acts[2];
   }
 
+  /** zone categories that are the subject of a chapter (from its events); null = all */
+  private subjectZones(ch: Chapter | null): Set<number> | null {
+    if (!ch) return null;
+    const cats = new Set<number>();
+    for (const id of ch.events ?? []) {
+      const r = relById.get(eventById.get(id)?.rel ?? '');
+      if (r) cats.add(r.zone);
+    }
+    // Islam and the caliphate's rule are one story
+    if (cats.has(7)) cats.add(8);
+    if (cats.has(8)) cats.add(7);
+    return cats.size ? cats : null;
+  }
+
   private tick = (dt: number) => {
     if (!this.world) return;
     this.wheelCool = Math.max(0, this.wheelCool - dt);
@@ -444,16 +513,12 @@ export class App {
     }
     const rig = this.stage.rig;
     const act = this.currentAct();
-    // caption keeps the subject clear of the text column
-    const worldK = Math.min(1, Math.max(0, (rig.view.dist - 12000) / 20000));
-    const wantShift = this.mode === 'film' && !this.titleOn && window.innerWidth > 820 ? 0.13 - 0.03 * worldK : 0;
-    rig.shift += (wantShift - rig.shift) * Math.min(1, dt * 1.5);
     if (REDUCED) {
       rig.drift.heading = 0;
       rig.drift.dist = 0;
     } else if (this.mode === 'film') {
       const d = Math.sin(this.stage.time * 0.11) * 0.8 + Math.sin(this.stage.time * 0.047) * 0.5;
-      rig.drift.heading = d * 0.9;
+      rig.drift.heading = d * 0.7;
     } else if (this.mode === 'intro') {
       rig.drift.heading = Math.sin(this.stage.time * 0.05) * 9;
       rig.drift.dist = Math.sin(this.stage.time * 0.037) * 0.06;
@@ -463,59 +528,79 @@ export class App {
     }
 
     this.world.updateZones(this.year);
+    this.spawnRipples();
     const ch: Chapter | null = this.mode === 'film' && this.film.i >= 0 ? chapters[this.film.i] : null;
     const focusRoutes = new Set(ch?.routes ?? []);
     const dim = new Set<string>();
     if (ch) for (const c of chapters) if (c.act === ch.act && chapters.indexOf(c) < this.film.i) for (const r of c.routes ?? []) dim.add(r);
     this.world.updateRoutes(this.year, focusRoutes, this.mode === 'free' ? 'free' : 'film', dim);
 
-    // focus spotlight
+    // focus: the rest of the map recedes towards the paper
     const fu = this.stage.light.uFocus.value as THREE.Vector4;
     if (ch?.focus && this.film.phase !== 'fly') {
       const [fx, fy] = project(ch.focus.lon, ch.focus.lat);
-      this.focusU.set(fx, fy, ch.focus.r, 0.55);
+      this.focusU.set(fx, fy, ch.focus.r, 1);
     } else this.focusU.w = 0;
     fu.x = this.focusU.w > 0 ? this.focusU.x : fu.x;
     fu.y = this.focusU.w > 0 ? this.focusU.y : fu.y;
     fu.z = this.focusU.w > 0 ? this.focusU.z : fu.z;
     fu.w += (this.focusU.w - fu.w) * Math.min(1, dt * 1.2);
 
-    // hearths: earlier acts glow as the camera pulls away from them
+    // earlier acts are ringed like an inset as the camera pulls away from them
     const hu = this.stage.light.uHearth.value as THREE.Vector4[];
     for (let k = 0; k < 2; k++) {
       const a = acts[k];
       const [hx, hy] = project(a.hearth.lon, a.hearth.lat);
-      const past = this.mode === "film" ? act.id > a.id : this.year > a.to + 60;
+      const past = this.mode === 'film' ? act.id > a.id : this.year > a.to + 60;
       const ratio = rig.view.dist / a.hearth.r;
-      const want = past ? Math.min(1, Math.max(0, (ratio - 4) / 12)) * (k === 0 ? 0.6 : 0.22) : 0;
+      const want = past ? Math.min(1, Math.max(0, (ratio - 4) / 10)) : 0;
       this.hearthA[k] += (want - this.hearthA[k]) * Math.min(1, dt * 0.8);
       hu[k].set(hx, hy, a.hearth.r, this.hearthA[k]);
     }
 
     this.yearEl.set(this.year);
-    const hideYear = this.mode === 'film' && !!ch?.noYear;
-    this.yearEl.root.style.visibility = hideYear ? 'hidden' : 'visible';
+    this.yearEl.show(this.mode !== 'intro' && !(this.mode === 'film' && !!ch?.noYear));
     this.timeline.set(this.year, act.id);
-    this.header.setAct(act);
+    if (this.mode !== 'intro') this.header.setAct(act);
     this.counter.update(this.year, act.id === 3 || (this.mode === 'free' && this.year >= 1900));
-    this.legend.set(this.activeReligions());
+
+    // the chapter's subject is saturated, the rest steps back
+    const subj = this.subjectZones(ch);
+    const emph = this.stage.zu.uZoneEmph.value as number[];
+    for (let i = 0; i < emph.length; i++) {
+      const want = !subj || subj.has(i) ? 1 : 0;
+      emph[i] += (want - emph[i]) * Math.min(1, dt * 2);
+    }
+    const onMap = this.activeReligions();
+    this.legend.set(onMap, new Set(subj ? onMap.filter((id) => !subj.has(relById.get(id)!.zone)) : []));
 
     const v = rig.view;
-    // zones step back at close range, where the relief itself tells the story
-    this.stage.zu.uZoneOn.value = 0.6 + 0.4 * Math.min(1, Math.max(0, (v.dist - 500) / 1300));
-    this.stage.zu.uZoneFillK.value = 0.2 + 0.8 * Math.min(1, Math.max(0, (v.dist - 450) / 1400));
-    const wk = Math.min(1, Math.max(0, (v.dist - 9000) / 25000));
-    this.stage.zu.uZoneFill.value = 0.36 + 0.2 * wk;
-    this.stage.zu.uZoneSat.value = 0.5 + 0.3 * wk;
+    const zu = this.stage.zu;
+    zu.uZoneOn.value = 1;
+    // at close range the tint thins out so the relief itself tells the story
+    zu.uZoneFillK.value = 0.6 + 0.4 * Math.min(1, Math.max(0, (v.dist - 450) / 1400));
+    zu.uZoneFill.value = 0.4 + 0.1 * Math.min(1, Math.max(0, (v.dist - 9000) / 25000));
     if (this.world.rivers) {
       const u = this.world.rivers.material.uniforms;
       u.uRankFade.value = v.dist < 1400 ? 8.5 : v.dist < 4000 ? 6.5 : v.dist < 12000 ? 4.5 : 2.5;
-      u.uOpacity.value = v.dist < 20000 ? 0.75 : 0.45;
+      u.uOpacity.value = v.dist < 20000 ? 0.85 : 0.55;
     }
-    const tilt = (this.mode === 'film' ? 0.5 : 0.78) + 0.2 * Math.min(1, Math.max(0, (v.dist - 15000) / 25000));
-    this.stage.tilt.focusArea += (tilt - this.stage.tilt.focusArea) * Math.min(1, dt * 2);
-    void v;
+    this.stage.light.uGrat.value = v.dist < 1100 ? 1 : v.dist < 5500 ? 5 : v.dist < 16000 ? 10 : v.dist < 30000 ? 15 : 30;
   };
+
+  /** a ring spreads from every community that appears while time runs forward */
+  private spawnRipples() {
+    const y0 = this.lastZoneYear, y1 = this.year;
+    this.lastZoneYear = y1;
+    if (this.mode === 'intro' || !Number.isFinite(y0) || !(y1 > y0) || y1 - y0 > 40 || REDUCED) return;
+    for (const z of this.world.zones) {
+      if (!z.first || z.from <= y0 || z.from > y1) continue;
+      const rel = religions.find((r) => r.zone === z.cat);
+      if (!rel) continue;
+      this.ripples.push({ x: z.x, y: z.y, c: this.world.color(relColor(rel.id)), t0: this.stage.time });
+    }
+    if (this.ripples.length > 60) this.ripples.splice(0, this.ripples.length - 60);
+  }
 
   private activeReligions(): string[] {
     const w = new Map<number, number>();
@@ -530,6 +615,15 @@ export class App {
     const ids: string[] = [];
     for (const r of religions) if ((w.get(r.zone) ?? 0) > 0.35) ids.push(r.id);
     return ids.filter((id) => zoneToRel.get(relById.get(id)!.zone) === id);
+  }
+
+  private mutedColor(hex: string) {
+    let c = this.muted.get(hex);
+    if (!c) {
+      c = this.world.color(hex).clone().lerp(this.world.color(PAPER), 0.45);
+      this.muted.set(hex, c);
+    }
+    return c;
   }
 
   private after = () => {
@@ -555,7 +649,8 @@ export class App {
     const film = this.mode === 'film';
     const chIdx = this.film.i;
     for (const e of this.world.evs) {
-      let alpha = 0, size = 0, hi = 0, label = false;
+      let alpha = 0, size = 0, hi = 0, label = false, kind = 1;
+      let color = this.world.color(relColor(e.rel));
       if (film) {
         if (e.act !== act.id) continue;
         const inCh = this.chapterEvents.has(e.id);
@@ -566,14 +661,16 @@ export class App {
           if (!this.seenEvents.has(e.id)) this.seenEvents.set(e.id, s.time);
           const age = s.time - first;
           alpha = Math.min(1, age * 1.5);
-          size = (e.rank ?? 3) === 1 ? 34 : 28;
+          size = 38;
           hi = Math.max(0, 1 - age / 3.5);
           label = true;
         } else {
           const chOf = chapters.findIndex((c) => (c.events ?? []).includes(e.id));
           if (chOf < 0 || chOf >= chIdx) continue;
-          alpha = 0.55;
-          size = 17;
+          alpha = 0.75;
+          size = 14;
+          kind = 2;
+          color = this.mutedColor(relColor(e.rel));
         }
       } else {
         const span = e.year < 750 ? 260 : e.year < 1500 ? 220 : 140;
@@ -584,23 +681,39 @@ export class App {
         const minD = e.act === 3 ? 9000 : e.act === 2 ? 1800 : 300;
         const maxD = e.act === 3 ? 70000 : e.act === 2 ? 22000 : (e.rank ?? 3) === 1 ? 12000 : 7000;
         if (v.dist > maxD || v.dist < minD * 0.2) continue;
-        alpha = Math.max(0.45, 1 - Math.max(0, age) / span);
-        size = (e.rank ?? 3) === 1 ? 28 : 22;
+        alpha = Math.max(0.55, 1 - Math.max(0, age) / span);
+        size = 36;
       }
       if (e.id === this.selected || e.id === this.hover) {
         hi = 1;
         alpha = 1;
         label = true;
+        kind = 1;
+        size = 38;
+        color = this.world.color(relColor(e.rel));
       }
       const h = ht(e.x, e.y);
-      markers.push({ x: e.x, y: e.y, size, alpha, color: this.world.color(relColor(e.rel)), kind: 1, hi });
+      markers.push({ x: e.x, y: e.y, size, alpha, color, kind, hi });
       const sp = toScreen(e.x, e.y, h);
       if (sp.ok && alpha > 0.3) this.screenPts.push({ id: e.id, x: sp.x, y: sp.y });
       if (label) labels.push({ key: 'e:' + e.id, x: e.x, y: e.y, h, text: e.title, sub: e.date, cls: 'ev', prio: 100 + (e.id === this.selected ? 50 : 0) - (e.rank ?? 3), anchor: 'right' });
     }
 
+    // ---- ripples of newly founded communities
+    for (let i = this.ripples.length - 1; i >= 0; i--) {
+      const r = this.ripples[i];
+      const age = (s.time - r.t0) / RIPPLE_LIFE;
+      if (age >= 1) {
+        this.ripples.splice(i, 1);
+        continue;
+      }
+      const e = 1 - (1 - age) * (1 - age);
+      markers.push({ x: r.x, y: r.y, size: 2 * (6 + 30 * e) + 4, alpha: 0.95, color: r.c, kind: 3, hi: age });
+    }
+
     // ---- places
     const y = this.year;
+    const ink = this.world.color('#2a2219');
     for (const p of this.world.plc) {
       if (p.from !== undefined && y < p.from) continue;
       if (p.to !== undefined && y > p.to) continue;
@@ -613,7 +726,7 @@ export class App {
       if (a <= 0.02) continue;
       if (p.kind === 'city') {
         const h = ht(p.x, p.y);
-        markers.push({ x: p.x, y: p.y, size: (p.rank ?? 3) === 1 ? 11 : 9, alpha: a, color: this.world.color('#efe6d2'), kind: 0, hi: 0 });
+        markers.push({ x: p.x, y: p.y, size: 14, alpha: a, color: ink, kind: 0, hi: (p.rank ?? 3) === 1 ? 1 : 0 });
         labels.push({ key: 'p:' + p.id, x: p.x, y: p.y, h, text: p.name, cls: `city r${p.rank ?? 3}`, prio: 60 - (p.rank ?? 3) * 5, anchor: 'right', alpha: a });
       } else {
         const cls = p.kind;
@@ -621,43 +734,17 @@ export class App {
         labels.push({ key: 'p:' + p.id, x: p.x, y: p.y, h: 0, text: p.name, cls, prio, anchor: 'center', angle: p.angle, alpha: a });
       }
     }
-    // earlier acts, seen from afar, keep a quiet name next to their glow
+    // earlier acts, seen from afar, keep a quiet name next to their ring
     for (let k = 0; k < 2; k++) {
       const a = acts[k];
       if (this.hearthA[k] < 0.15) continue;
       const [hx, hy] = project(a.hearth.lon, a.hearth.lat);
-      labels.push({ key: 'h:' + k, x: hx, y: hy - a.hearth.r * 0.9, h: 0, text: `Акт ${a.roman} · ${a.title}`, cls: 'hearth', prio: 90, anchor: 'center', alpha: Math.min(1, this.hearthA[k] * 2.2) });
+      labels.push({ key: 'h:' + k, x: hx, y: hy - a.hearth.r * 1.35, h: 0, text: `Акт ${a.roman} · ${a.title}`, cls: 'hearth', prio: 90, anchor: 'center', alpha: Math.min(1, this.hearthA[k] * 2) });
     }
-    const pxk = this.world.pxK.value;
-    const camPos = cam.position;
-    this.world.updateParticles(
-      s.time,
-      v.dist,
-      (x, y) => pxk * Math.hypot(camPos.x - x, camPos.y, camPos.z + y),
-      ht,
-    );
     this.world.setMarkers(markers);
-    // keep labels clear of the interface
-    const block: [number, number, number, number][] = [];
-    const rect = (e: Element | null) => {
-      if (!e) return;
-      const r = (e as HTMLElement).getBoundingClientRect();
-      if (r.width && getComputedStyle(e).opacity !== '0') block.push([r.left - 8, r.top - 8, r.right + 8, r.bottom + 8]);
-    };
-    rect(this.yearEl.root);
-    if (this.mode === 'film') rect(this.caption.root);
-    rect(this.filmBar.root.style.display === 'none' ? null : this.filmBar.root);
-    if (this.mode === 'free') rect(this.timeline.root);
-    rect(this.legend.root);
-    rect(this.counter.root.classList.contains('on') ? this.counter.root : null);
-    rect(document.querySelector('.brand'));
-    if (this.panel.open) block.push([this.panel.root.getBoundingClientRect().left - 12, 0, W, H]);
-    rect(document.querySelector('.modes'));
-    this.labels.root.style.opacity = this.mode === 'intro' || this.titleOn ? '0' : '1';
-    this.labels.update(labels, cam, W, H, block);
+    this.labels.root.style.opacity = this.mode === 'intro' ? '0' : '1';
+    this.labels.update(labels, cam, W, H);
   };
 }
 
 export type { View };
-void places;
-void fmtYear;

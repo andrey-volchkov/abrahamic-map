@@ -11,59 +11,85 @@ export const ZONE_GLSL = /* glsl */ `
 uniform sampler2D uZ0; uniform sampler2D uZ1; uniform sampler2D uZ2;
 uniform vec4 uZoneWin;              // x0, y0 (south-west), size km, 1/size
 uniform vec3 uZoneCol[${ZONE_CATS}];
-uniform float uZoneStyle[${ZONE_CATS}]; // 0 solid, 1 hatched
+uniform float uZoneEmph[${ZONE_CATS}]; // 1 = the chapter's subject, 0 = background
 uniform float uZoneOn;
-uniform float uZoneFill;
-uniform float uZoneFillK;
-uniform float uZoneSat;
+uniform float uZoneFill;            // interior tint strength
+uniform float uZoneFillK;           // close-range reduction
+uniform float uZoneBand;            // width of the edge ribbon, px
+uniform vec3 uPaper;                // page colour (linear)
+uniform float uZoneRes;             // field texture size, texels
 uniform sampler2D uNoise;
 
-vec3 applyZones(vec3 c, vec2 p, float fp, float landCover, float time) {
-  if (uZoneOn <= 0.0 || landCover <= 0.0) return c;
+float solidAt(int i, vec2 uv) { return i < 4 ? textureLod(uZ0, uv, 0.0)[i] : textureLod(uZ1, uv, 0.0)[i - 4]; }
+float hatchAt(int i, vec2 uv) { return textureLod(uZ2, uv, 0.0)[i - 8]; }
+
+// a printer's tint: ink laid over paper at a given strength, mixed in display space
+vec3 inkTint(vec3 ink, float k) {
+  vec3 a = pow(uPaper, vec3(1.0 / 2.2)), b = pow(ink, vec3(1.0 / 2.2));
+  return pow(mix(a, b, k), vec3(2.2));
+}
+
+// Atlas-style zones: a flat tint, a stronger ribbon along the inside of the edge and a
+// crisp contour. \`shade\` is a grey relief factor, so the relief reads through the tint.
+vec3 applyZones(vec3 col, vec2 p, float fp, float landCover, float shade) {
   vec2 uv = (p - uZoneWin.xy) * uZoneWin.w;
-  if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) return c;
   vec4 a = texture(uZ0, uv), b = texture(uZ1, uv), d = texture(uZ2, uv);
   float v[8] = float[](a.r, a.g, a.b, a.a, b.r, b.g, b.b, b.a);
   // domain-warped noise keeps the contours organic at every scale
-  vec2 wp = p + (texture(uNoise, p / 2600.0).rg - 0.5) * 900.0;
-  float n = texture(uNoise, wp / 900.0).r * 0.55 + texture(uNoise, wp / 240.0).g * 0.3 + texture(uNoise, wp / 70.0).b * 0.15;
-  float T = 0.46 + (n - 0.5) * 0.42;
-  float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
-
-  // solid layer: the dominant tradition
+  vec2 wp = p + (texture(uNoise, p / 2600.0).rg - 0.5) * 700.0;
+  float n = texture(uNoise, wp / 900.0).r * 0.6 + texture(uNoise, wp / 240.0).g * 0.3 + texture(uNoise, wp / 70.0).b * 0.1;
+  float T = 0.46 + (n - 0.5) * 0.3;
   int im = 0; float m1 = 0.0; float m2 = 0.0; int i2 = 0;
   for (int i = 0; i < 8; i++) {
     if (v[i] > m1) { m2 = m1; i2 = im; m1 = v[i]; im = i; }
     else if (v[i] > m2) { m2 = v[i]; i2 = i; }
   }
-  if (m1 > 0.1) {
-    float aa = max(fwidth(m1) * 1.1, 0.004);
-    float pres = smoothstep(T - aa, T + aa, m1);
-    vec3 zc = uZoneCol[im];
-    float share = 1.0 - smoothstep(0.0, 0.3, (m1 - m2) / max(m1, 1e-3));
-    zc = mix(zc, uZoneCol[i2], share * 0.5 * step(T, m2));
-    // tint that keeps the relief: hue from the zone colour, luminance from the model
-    float zl = max(dot(zc, vec3(0.2126, 0.7152, 0.0722)), 1e-3);
-    // hue of the tradition at the model's own luminance: relief stays, colour reads clearly
-    vec3 wash = mix(c, vec3(lum) * mix(vec3(1.0), zc / zl, uZoneSat), 0.85) * 1.04;
-    // watercolour: pigment pools towards the edge, the interior stays light
-    float inner = smoothstep(T, T + 0.5, m1);
-    float fill = mix(0.72, uZoneFill, inner);
-    c = mix(c, wash, pres * fill * uZoneFillK * landCover * uZoneOn);
-    float rim = 1.0 - smoothstep(0.0, aa * 2.6, abs(m1 - T));
-    c += zc * rim * 0.5 * landCover * uZoneOn;
-  }
-
-  // hatched layer: political control (e.g. the caliphate) over whatever lies beneath
   float h1 = d.r; int hi = 8;
   if (d.g > h1) { h1 = d.g; hi = 9; }
   if (d.b > h1) { h1 = d.b; hi = 10; }
   if (d.a > h1) { h1 = d.a; hi = 11; }
-  if (h1 > 0.1) {
-    float aa = max(fwidth(h1) * 1.1, 0.004);
-    float hp = smoothstep(T - aa, T + aa, h1);
+  if (uZoneOn <= 0.0 || landCover <= 0.0) return col;
+  if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) return col;
+  float k = uZoneOn * landCover;
+  // field gradients by central differences (smooth, unlike screen-space derivatives);
+  // distance to the contour in pixels = (value - threshold) / (change per pixel)
+  float du = 1.0 / uZoneRes;
+  float perPx = fp / (2.0 * du * uZoneWin.z);
+  vec2 ex = vec2(du, 0.0), ey = vec2(0.0, du);
+
+  // solid layer: the dominant tradition
+  if (m1 > 0.05) {
+    float f = m1 - T;
+    vec2 g = vec2(solidAt(im, uv + ex) - solidAt(im, uv - ex), solidAt(im, uv + ey) - solidAt(im, uv - ey));
+    float dpx = f / max(length(g) * perPx, 1e-5);
+    float inside = clamp(dpx + 0.5, 0.0, 1.0);
+    float emph = uZoneEmph[im];
+    vec3 zc = uZoneCol[im];
+    // where two traditions share ground about equally, the tint leans towards the second
+    float share = 1.0 - smoothstep(0.0, 0.2, (m1 - m2) / max(m1, 1e-3));
+    zc = mix(zc, uZoneCol[i2], share * 0.5 * step(T, m2) * uZoneEmph[i2]);
+    // background traditions: a paler tint of their own hue, partly transparent
+    float bandW = uZoneBand * mix(0.5, 1.0, emph);
+    float band = 1.0 - smoothstep(bandW * 0.45, bandW, dpx);
+    // flat light tint inside, a strong ribbon along the edge, relief shading on top
+    vec3 tint = inkTint(zc, mix(uZoneFill * mix(0.6, 1.0, emph), mix(0.5, 0.85, emph), band)) * shade;
+    float cover = mix(mix(0.55, 0.92, emph) * uZoneFillK, mix(0.6, 0.96, emph), band);
+    col = mix(col, tint, inside * cover * k);
+    // the contour itself
+    float edge = 1.0 - smoothstep(0.45, 1.25, abs(dpx + 0.2));
+    col = mix(col, mix(zc, zc * 0.55, emph), edge * mix(0.5, 0.95, emph) * k);
+  }
+
+  // hatched layer: political control (e.g. the caliphate) over whatever lies beneath
+  if (h1 > 0.05) {
+    float fh = h1 - T;
+    vec2 g = vec2(hatchAt(hi, uv + ex) - hatchAt(hi, uv - ex), hatchAt(hi, uv + ey) - hatchAt(hi, uv - ey));
+    float dpx = fh / max(length(g) * perPx, 1e-5);
+    float inside = clamp(dpx + 0.5, 0.0, 1.0);
+    float emph = uZoneEmph[hi];
     vec3 hc = uZoneCol[hi];
-    float sl = log2(fp * 10.0);
+    // diagonal hatching with a constant on-screen period
+    float sl = log2(fp * 9.0);
     float sf = floor(sl);
     float st = sl - sf;
     float s1 = exp2(sf), s2 = exp2(sf + 1.0);
@@ -71,11 +97,11 @@ vec3 applyZones(vec3 c, vec2 p, float fp, float landCover, float time) {
     float l1 = 1.0 - smoothstep(0.9, 1.7, abs(fract(q / s1) - 0.5) * s1 / fp);
     float l2 = 1.0 - smoothstep(0.9, 1.7, abs(fract(q / s2) - 0.5) * s2 / fp);
     float stripe = mix(l1, l2, st);
-    c = mix(c, hc * (lum * 2.1 + 0.02), hp * (0.12 + 0.55 * stripe) * landCover * uZoneOn);
-    float rim = 1.0 - smoothstep(0.0, aa * 2.5, abs(h1 - T));
-    c += hc * rim * 0.35 * landCover * uZoneOn;
+    col = mix(col, inkTint(hc, 0.85) * shade, inside * (0.08 + stripe * mix(0.45, 0.85, emph)) * k);
+    float edge = 1.0 - smoothstep(0.45, 1.25, abs(dpx + 0.2));
+    col = mix(col, hc * 0.55, edge * mix(0.3, 0.85, emph) * k);
   }
-  return c;
+  return col;
 }
 `;
 
@@ -128,10 +154,10 @@ export interface Splat {
 
 export function createZoneUniforms() {
   const cols: THREE.Color[] = [];
-  const style: number[] = [];
+  const emph: number[] = [];
   for (let i = 0; i < ZONE_CATS; i++) {
     cols.push(new THREE.Color(1, 1, 1));
-    style.push(0);
+    emph.push(1);
   }
   return {
     uZ0: { value: null as THREE.Texture | null },
@@ -139,11 +165,12 @@ export function createZoneUniforms() {
     uZ2: { value: null as THREE.Texture | null },
     uZoneWin: { value: new THREE.Vector4(0, 0, 1, 1) },
     uZoneCol: { value: cols },
-    uZoneStyle: { value: style },
+    uZoneEmph: { value: emph },
     uZoneOn: { value: 1 },
-    uZoneFill: { value: 0.36 },
+    uZoneFill: { value: 0.4 },
     uZoneFillK: { value: 1 },
-    uZoneSat: { value: 0.55 },
+    uZoneBand: { value: 11 },
+    uZoneRes: { value: 768 },
   };
 }
 export type ZoneUniforms = ReturnType<typeof createZoneUniforms>;
@@ -160,6 +187,7 @@ export class Influence {
 
   constructor(public zu: ZoneUniforms, size = 768) {
     this.size = size;
+    zu.uZoneRes.value = size;
     this.rt = new THREE.WebGLRenderTarget(size, size, {
       count: 3,
       type: THREE.HalfFloatType,
@@ -200,9 +228,8 @@ export class Influence {
     this.scene.add(mesh);
   }
 
-  setColors(colors: string[], styles: number[]) {
+  setColors(colors: string[]) {
     colors.forEach((c, i) => this.zu.uZoneCol.value[i].set(c).convertSRGBToLinear());
-    styles.forEach((s, i) => (this.zu.uZoneStyle.value[i] = s));
   }
 
   /** place the field window around the view; cx, cy = map point, size = window size in km */

@@ -11,9 +11,8 @@
     "data": "node scripts/build-data.mjs"
   },
   "dependencies": {
-    "@fontsource/cormorant-garamond": "^5.3.0",
-    "@fontsource/ibm-plex-sans": "^5.3.0",
-    "@fontsource/source-serif-4": "^5.3.0",
+    "@fontsource/old-standard-tt": "^5.3.0",
+    "@fontsource/pt-sans-narrow": "^5.3.0",
     "fflate": "^0.8.3",
     "postprocessing": "^6.39.5",
     "three": "^0.186.1"

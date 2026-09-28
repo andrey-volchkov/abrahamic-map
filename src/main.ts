@@ -1,10 +1,8 @@
-import '@fontsource/cormorant-garamond/500.css';
-import '@fontsource/cormorant-garamond/600.css';
-import '@fontsource/cormorant-garamond/500-italic.css';
-import '@fontsource/source-serif-4/400.css';
-import '@fontsource/source-serif-4/400-italic.css';
-import '@fontsource/ibm-plex-sans/400.css';
-import '@fontsource/ibm-plex-sans/500.css';
+import '@fontsource/old-standard-tt/400.css';
+import '@fontsource/old-standard-tt/400-italic.css';
+import '@fontsource/old-standard-tt/700.css';
+import '@fontsource/pt-sans-narrow/400.css';
+import '@fontsource/pt-sans-narrow/700.css';
 import './style.css';
 import { animCfg } from './ui/anim';
 import { App } from './app';
@@ -21,7 +19,7 @@ function webglOk() {
 
 if (!webglOk()) {
   document.getElementById('ui')!.innerHTML =
-    '<div class="intro"><h1 style="font-size:48px">Нужен WebGL 2</h1><div class="sub">Откройте страницу в свежей версии Chrome, Firefox, Safari или Edge.</div></div>';
+    '<div class="about on"><div class="inner"><h2>Нужен WebGL 2</h2><p>Откройте страницу в свежей версии Chrome, Firefox, Safari или Edge.</p></div></div>';
 } else {
   const app = new App();
   app

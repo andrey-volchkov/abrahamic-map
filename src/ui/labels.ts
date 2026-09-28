@@ -1,5 +1,6 @@
 // Map labels as DOM elements, projected from the 3D scene each frame with greedy
-// priority-based collision avoidance.
+// priority-based collision avoidance. A label is shown only when it fits inside the map
+// frame entirely; point labels try the right, left, top and bottom of their point.
 import * as THREE from 'three';
 import { el, esc } from './dom';
 
@@ -26,12 +27,16 @@ interface Slot {
   shown: boolean;
   seen: number;
   html: string;
+  /** preferred side index for point labels (kept while it works, to avoid flicker) */
+  side: number;
 }
 
+type Box = [number, number, number, number];
 const v = new THREE.Vector3();
+const EDGE = 6; // px kept free along the frame
 
 export class LabelLayer {
-  root = el('div', 'labels');
+  root = el('div', 'labels map-box');
   private slots = new Map<string, Slot>();
   private frame = 0;
 
@@ -39,10 +44,15 @@ export class LabelLayer {
     parent.appendChild(this.root);
   }
 
-  update(items: LabelItem[], camera: THREE.Camera, w: number, h: number, block: [number, number, number, number][] = []) {
+  update(items: LabelItem[], camera: THREE.Camera, w: number, h: number, block: Box[] = []) {
     this.frame++;
-    const placed: [number, number, number, number][] = block.slice();
+    const placed: Box[] = block.slice();
     const sorted = items.slice().sort((a, b) => b.prio - a.prio);
+    const hits = (b: Box) => {
+      if (b[0] < EDGE || b[1] < EDGE || b[2] > w - EDGE || b[3] > h - EDGE) return true;
+      for (const p of placed) if (b[0] < p[2] && b[2] > p[0] && b[1] < p[3] && b[3] > p[1]) return true;
+      return false;
+    };
     for (const it of sorted) {
       let s = this.slots.get(it.key);
       const html = it.sub ? `${esc(it.text)}<span>${esc(it.sub)}</span>` : esc(it.text);
@@ -51,7 +61,7 @@ export class LabelLayer {
         e.innerHTML = html;
         e.style.opacity = '0';
         this.root.appendChild(e);
-        s = { el: e, w: 0, h: 0, sx: -1e4, sy: -1e4, shown: false, seen: 0, html };
+        s = { el: e, w: 0, h: 0, sx: -1e4, sy: -1e4, shown: false, seen: 0, html, side: 0 };
         this.slots.set(it.key, s);
       } else if (s.html !== html) {
         s.el.innerHTML = html;
@@ -69,48 +79,53 @@ export class LabelLayer {
         continue;
       }
       const px = (v.x * 0.5 + 0.5) * w, py = (-v.y * 0.5 + 0.5) * h;
-      let bx: number, by: number;
+      const pad = 4;
+      let bx = 0, by = 0, ok = false;
       if (it.anchor === 'right') {
-        bx = px + 9;
-        by = py - s.h / 2;
+        // candidate positions around the point: right, left, above, below
+        const cands: [number, number][] = [
+          [px + 11, py - s.h / 2],
+          [px - 11 - s.w, py - s.h / 2],
+          [px - s.w / 2, py - 12 - s.h],
+          [px - s.w / 2, py + 12],
+        ];
+        for (let k = 0; k < cands.length && !ok; k++) {
+          const i = (s.side + k) % cands.length;
+          const [cx, cy] = cands[i];
+          const box: Box = [cx - pad, cy - pad / 2, cx + s.w + pad, cy + s.h + pad / 2];
+          if (!hits(box)) {
+            bx = cx;
+            by = cy;
+            ok = true;
+            s.side = i;
+            placed.push(box);
+          }
+        }
       } else {
         bx = px - s.w / 2;
         by = py - s.h / 2;
-      }
-      const pad = 6;
-      let box: [number, number, number, number] = [bx - pad, by - pad / 2, bx + s.w + pad, by + s.h + pad / 2];
-      if (it.angle) {
-        // bounding box of the rotated label (rotation about its centre)
-        const a = (it.angle * Math.PI) / 180, c = Math.abs(Math.cos(a)), sn = Math.abs(Math.sin(a));
-        const hw = (s.w * c + s.h * sn) / 2 + pad, hh = (s.w * sn + s.h * c) / 2 + pad / 2;
-        const cx = bx + s.w / 2, cy = by + s.h / 2;
-        box = [cx - hw, cy - hh, cx + hw, cy + hh];
-      }
-      if (box[2] < 0 || box[0] > w || box[3] < 0 || box[1] > h) {
-        this.hide(s);
-        continue;
-      }
-      let hit = false;
-      {
-        for (const b of placed) {
-          if (box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1]) {
-            hit = true;
-            break;
-          }
+        let box: Box = [bx - pad, by - pad / 2, bx + s.w + pad, by + s.h + pad / 2];
+        if (it.angle) {
+          // bounding box of the rotated label (rotation about its centre)
+          const a = (it.angle * Math.PI) / 180, c = Math.abs(Math.cos(a)), sn = Math.abs(Math.sin(a));
+          const hw = (s.w * c + s.h * sn) / 2 + pad, hh = (s.w * sn + s.h * c) / 2 + pad / 2;
+          box = [px - hw, py - hh, px + hw, py + hh];
+        }
+        if (!hits(box)) {
+          ok = true;
+          placed.push(box);
         }
       }
-      if (hit) {
+      if (!ok) {
         this.hide(s);
         continue;
       }
-      placed.push(box);
       if (Math.abs(bx - s.sx) > 0.3 || Math.abs(by - s.sy) > 0.3) {
         s.el.style.transform = `translate3d(${bx.toFixed(1)}px, ${by.toFixed(1)}px, 0)${it.angle ? ` rotate(${it.angle}deg)` : ''}`;
         s.sx = bx;
         s.sy = by;
       }
-      const a = it.alpha ?? 1;
-      const op = String(Math.round(a * 100) / 100);
+      const op = String(Math.round((it.alpha ?? 1) * 100) / 100);
       if (!s.shown || s.el.style.opacity !== op) {
         s.el.style.opacity = op;
         s.shown = true;
