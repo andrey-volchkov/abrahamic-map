@@ -197,6 +197,9 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 1px s
 
 @media (max-width: 820px) {
   .brand { left: 20px; top: 18px; }
+  .brand .name, .brand .rule { display: none; }
+  .modes button { font-size: 10px; letter-spacing: 0.1em; }
+  .intro .foot { font-size: 11px; bottom: 16px; }
   .modes { right: 20px; top: 20px; gap: 14px; }
   .year { right: 20px; top: 56px; }
   .year .num { font-size: 42px; }

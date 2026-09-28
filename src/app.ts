@@ -1,7 +1,6 @@
 // Orchestrates the stage, the story state and the interface: film mode (chapters with
 // camera flights) and free mode (timeline + free camera).
 import * as THREE from 'three';
-import gsap from 'gsap';
 import { Stage } from './engine/stage';
 import { loadLevel, loadMeta, type Level } from './engine/assets';
 import { viewFromSpec, type View } from './engine/camera';
@@ -12,6 +11,7 @@ import type { MarkerState } from './engine/markers';
 import { LabelLayer, type LabelItem } from './ui/labels';
 import { About, ActTitle, Caption, Counter, FilmBar, Header, Intro, Legend, Panel, Timeline, YearDisplay } from './ui/components';
 import { el, esc } from './ui/dom';
+import { animCfg } from './ui/anim';
 import { fmtYear } from './story/format';
 import counterJson from './data/counter.json';
 import type { Act, Chapter, EventItem } from './story/types';
@@ -28,7 +28,7 @@ export class App {
   ui = document.getElementById('ui') as HTMLElement;
   mode: Mode = 'intro';
   year = -1250;
-  private yearTween: gsap.core.Tween | null = null;
+  private yearTween: { from: number; to: number; t: number; dur: number } | null = null;
   film = { i: -1, playing: true, t: 0, phase: 'idle' as 'idle' | 'fly' | 'play' | 'hold', hold: 0, token: 0 };
   free = { playing: false };
   selected: string | null = null;
@@ -195,7 +195,7 @@ export class App {
     this.stage.rig.shift = 0;
     this.stage.tilt.focusArea = 0.78;
     this.stage.tilt.feather = 0.3;
-    this.yearTween?.kill();
+    this.yearTween = null;
     if (this.film.i < 0) this.stage.rig.flyTo(viewFromSpec(acts[0].view));
   }
 
@@ -205,13 +205,12 @@ export class App {
   }
 
   setYear(y: number) {
-    this.yearTween?.kill();
+    this.yearTween = null;
     this.year = Math.max(-1800, Math.min(2025, y));
   }
 
   private tweenYear(to: number, dur: number) {
-    this.yearTween?.kill();
-    this.yearTween = gsap.to(this, { year: to, duration: dur, ease: 'power1.inOut' });
+    this.yearTween = { from: this.year, to, t: 0, dur: Math.max(0.01, dur * animCfg.scale) };
   }
 
   // ------------------------------------------------------------------ film
@@ -375,6 +374,12 @@ export class App {
   private tick = (dt: number) => {
     if (!this.world) return;
     this.wheelCool = Math.max(0, this.wheelCool - dt);
+    const yt = this.yearTween;
+    if (yt) {
+      yt.t = Math.min(1, yt.t + dt / yt.dur);
+      this.year = yt.from + (yt.to - yt.from) * ease(yt.t);
+      if (yt.t >= 1) this.yearTween = null;
+    }
     if (this.mode === 'film') this.filmTick(dt);
     if (this.mode === 'free' && this.free.playing) {
       const rate = this.year < 750 ? 38 : this.year < 1500 ? 26 : 12;

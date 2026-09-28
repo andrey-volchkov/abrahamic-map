@@ -6,7 +6,7 @@ import '@fontsource/source-serif-4/400-italic.css';
 import '@fontsource/ibm-plex-sans/400.css';
 import '@fontsource/ibm-plex-sans/500.css';
 import './style.css';
-import gsap from 'gsap';
+import { animCfg } from './ui/anim';
 import { App } from './app';
 import { viewFromSpec } from './engine/camera';
 
@@ -27,7 +27,7 @@ if (!webglOk()) {
   app.boot().then(() => {
     // debugging / screenshots: ?v={"lon":..,"lat":..,"dist":..}&year=..&chapter=..
     const q = new URLSearchParams(location.search);
-    if (q.get('fast')) gsap.globalTimeline.timeScale(50);
+    if (q.get('fast')) animCfg.scale = 0.02;
     if (q.get('step')) app.stage.fixedDt = +(q.get('step') as string);
     if (q.get('snap') || q.get('free') || q.get('chapter')) app.header.show(true);
     if (q.get('v')) app.stage.rig.set(viewFromSpec(JSON.parse(q.get('v') as string)));

@@ -1,4 +1,4 @@
-import gsap from 'gsap';
+import { anim, EASE, fadeTo, rise, stop } from './anim';
 import { el, esc, ICON } from './dom';
 import { CERT_HINT, CERT_LABEL, yearParts } from '../story/format';
 import type { Act, Chapter, EventItem } from '../story/types';
@@ -29,7 +29,8 @@ export class Header {
     parent.append(el('div', 'scrim-top'), brand, this.modes);
   }
   show(on: boolean) {
-    gsap.to([this.brand, this.modes], { opacity: on ? 1 : 0, duration: 0.8 });
+    fadeTo(this.brand, on ? 1 : 0, 0.8);
+    fadeTo(this.modes, on ? 1 : 0, 0.8);
   }
   setMode(m: 'film' | 'free') {
     const [film, free] = Array.from(this.modes.children) as HTMLElement[];
@@ -60,7 +61,7 @@ export class YearDisplay {
     this.era.textContent = p.era;
   }
   show(on: boolean) {
-    gsap.to(this.root, { opacity: on ? 1 : 0, duration: 0.6 });
+    fadeTo(this.root, on ? 1 : 0, 0.6);
   }
 }
 
@@ -81,13 +82,12 @@ export class Caption {
     if (extra) this.root.append(el('div', 'caps more', extra));
     this.scrim.classList.add('on');
     const kids = Array.from(this.root.children);
-    gsap.killTweensOf([this.root, ...kids]);
-    gsap.set(this.root, { opacity: 1 });
-    gsap.fromTo(kids, { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 1.1, stagger: 0.12, ease: 'power3.out' });
+    stop(this.root);
+    this.root.style.opacity = '1';
+    rise(kids, 14, 1.1, 0.12);
   }
   hide(scrim = true) {
-    gsap.killTweensOf(this.root);
-    gsap.to(this.root, { opacity: 0, duration: 0.45, ease: 'power2.in' });
+    fadeTo(this.root, 0, 0.45, EASE.in);
     if (scrim) this.scrim.classList.remove('on');
   }
 }
@@ -106,19 +106,20 @@ export class ActTitle {
     const range = el('div', 'caps range', esc(a.range));
     const rule = el('div', 'rule');
     this.root.append(kick, h, sub, range, rule);
-    return new Promise((resolve) => {
-      const tl = gsap.timeline({ onComplete: () => resolve() });
-      tl.set(this.root, { opacity: 1 });
-      tl.fromTo(kick, { opacity: 0, letterSpacing: '1.1em' }, { opacity: 1, letterSpacing: '0.5em', duration: 1.6, ease: 'power3.out' }, 0);
-      tl.fromTo(h, { opacity: 0, y: 24, filter: 'blur(8px)' }, { opacity: 1, y: 0, filter: 'blur(0px)', duration: 1.6, ease: 'power3.out' }, 0.25);
-      tl.fromTo([sub, range], { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 1.2, stagger: 0.15, ease: 'power2.out' }, 0.8);
-      tl.fromTo(rule, { scaleY: 0, transformOrigin: 'top' }, { scaleY: 1, duration: 1.2, ease: 'power2.inOut' }, 1.2);
-      tl.to(this.root, { opacity: 0, duration: 1.1, ease: 'power2.in' }, 1.2 + hold);
-    });
+    stop(this.root, kick, h, sub, range, rule);
+    this.root.style.opacity = '1';
+    anim(kick, [{ opacity: 0, letterSpacing: '1.1em' }, { opacity: 1, letterSpacing: '0.5em' }], 1.6, 0, EASE.out3);
+    anim(h, [{ opacity: 0, transform: 'translateY(24px)', filter: 'blur(8px)' }, { opacity: 1, transform: 'none', filter: 'blur(0px)' }], 1.6, 0.25, EASE.out3);
+    rise([sub, range], 10, 1.2, 0.15, 0.8, EASE.out);
+    anim(rule, [{ transform: 'scaleY(0)', transformOrigin: 'top' }, { transform: 'scaleY(1)', transformOrigin: 'top' }], 1.2, 1.2, EASE.inOut);
+    const out = anim(this.root, [{ opacity: 1 }, { opacity: 0 }], 1.1, 1.2 + hold, EASE.in);
+    return out.finished.then(
+      () => undefined,
+      () => undefined,
+    );
   }
   hideNow() {
-    gsap.killTweensOf(this.root);
-    gsap.to(this.root, { opacity: 0, duration: 0.3 });
+    fadeTo(this.root, 0, 0.3);
   }
 }
 
@@ -340,7 +341,7 @@ export class Panel {
     if ((e.cert ?? []).length) this.root.append(badges);
     this.root.append(text, nav);
     this.root.classList.add('on');
-    gsap.fromTo(Array.from(this.root.children).slice(1), { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.7, stagger: 0.05, ease: 'power2.out', delay: 0.15 });
+    rise(Array.from(this.root.children).slice(1), 10, 0.7, 0.05, 0.15);
   }
   hide() {
     this.current = null;
@@ -410,7 +411,7 @@ export class Counter {
     this.val.textContent = p.value;
     this.yr.textContent = `оценка на ${p.year} г.`;
     this.src.textContent = p.source;
-    gsap.fromTo(this.val, { opacity: 0 }, { opacity: 1, duration: 0.8 });
+    anim(this.val, [{ opacity: 0 }, { opacity: 1 }], 0.8);
   }
 }
 

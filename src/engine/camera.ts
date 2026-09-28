@@ -140,7 +140,9 @@ export class CameraRig {
 
   apply() {
     const v = this.view;
-    const dist = v.dist * (1 + this.drift.dist);
+    // portrait screens see less of the map horizontally: pull back to compensate
+    const aspectK = Math.max(1, Math.pow(1.5 / Math.max(0.3, this.camera.aspect), 0.75));
+    const dist = v.dist * (1 + this.drift.dist) * aspectK;
     const p = Math.max(0.01, Math.min(80, v.pitch + this.drift.pitch)) * D2R;
     const h = (v.heading + this.drift.heading) * D2R;
     this.target.set(v.x, 0, -v.y);
