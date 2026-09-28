@@ -26,6 +26,7 @@ export function viewFromSpec(s: ViewSpec): View {
 }
 
 const D2R = Math.PI / 180;
+const REDUCED_MOTION = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 const RHO = 1.35;
 
 function zoomPath(c0: [number, number], w0: number, c1: [number, number], w1: number) {
@@ -104,7 +105,8 @@ export class CameraRig {
     while (dh < -180) dh += 360;
     const target = { ...to, heading: from.heading + dh };
     const path = zoomPath([from.x, from.y], from.dist, [to.x, to.y], to.dist);
-    const dur = opts.duration ?? Math.min(7, Math.max(1.6, path.S * (opts.speed ?? 1.25)));
+    let dur = opts.duration ?? Math.min(7, Math.max(1.6, path.S * (opts.speed ?? 1.25)));
+    if (REDUCED_MOTION) dur = Math.min(dur, 0.8);
     return new Promise((resolve) => {
       this.flight = { from, to: target, path, t: 0, dur, resolve };
     });

@@ -19,6 +19,7 @@ import type { Act, Chapter, EventItem } from './story/types';
 type Mode = 'intro' | 'film' | 'free';
 
 const byYear = events.slice().sort((a, b) => a.year - b.year);
+const REDUCED = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 const zoneToRel = new Map(religions.map((r) => [r.zone, r.id]));
 const ease = (t: number) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
 
@@ -128,8 +129,8 @@ export class App {
         this.wheelCool = 1.3;
       }
     };
-    this.controls.onInteract = () => {
-      this.free.playing && void 0;
+    this.controls.onSwipe = (d) => {
+      if (this.mode === 'film') this.go(this.film.i + d);
     };
     window.addEventListener('keydown', this.key);
     this.stage.onFrame(this.tick);
@@ -395,7 +396,10 @@ export class App {
     const worldK = Math.min(1, Math.max(0, (rig.view.dist - 12000) / 20000));
     const wantShift = this.mode === 'film' && !this.titleOn && window.innerWidth > 820 ? 0.13 - 0.06 * worldK : 0;
     rig.shift += (wantShift - rig.shift) * Math.min(1, dt * 1.5);
-    if (this.mode === 'film') {
+    if (REDUCED) {
+      rig.drift.heading = 0;
+      rig.drift.dist = 0;
+    } else if (this.mode === 'film') {
       const d = Math.sin(this.stage.time * 0.11) * 0.8 + Math.sin(this.stage.time * 0.047) * 0.5;
       rig.drift.heading = d * 0.9;
     } else if (this.mode === 'intro') {

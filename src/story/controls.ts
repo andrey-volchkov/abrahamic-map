@@ -14,6 +14,8 @@ export class MapControls {
   onTap: (x: number, y: number) => void = () => {};
   onHover: (x: number, y: number) => void = () => {};
   onWheelFilm: (dy: number) => void = () => {};
+  onSwipe: (dir: 1 | -1) => void = () => {};
+  private start = { x: 0, y: 0 };
   onInteract = () => {};
 
   constructor(private el: HTMLElement, private rig: CameraRig) {
@@ -43,6 +45,7 @@ export class MapControls {
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     this.moved = 0;
     this.last = { x: e.clientX, y: e.clientY };
+    this.start = { x: e.clientX, y: e.clientY };
     if (!this.enabled) return;
     this.rig.cancelFlight();
     this.onInteract();
@@ -99,6 +102,12 @@ export class MapControls {
     const had = this.pointers.has(e.pointerId);
     this.pointers.delete(e.pointerId);
     if (had && this.moved < 6 && this.pointers.size === 0) this.onTap(e.clientX, e.clientY);
+    else if (had && !this.enabled && this.pointers.size === 0) {
+      // film mode: a swipe turns the page
+      const dx = e.clientX - this.start.x, dy = e.clientY - this.start.y;
+      const d = Math.abs(dx) > Math.abs(dy) ? -dx : -dy;
+      if (Math.abs(d) > 60) this.onSwipe(d > 0 ? 1 : -1);
+    }
     if (this.pointers.size === 0) this.mode = null;
   };
 

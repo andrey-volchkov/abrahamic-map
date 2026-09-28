@@ -190,7 +190,8 @@ export class Ribbon {
       },
       transparent: true,
       depthWrite: false,
-      depthTest: true,
+      // drawn over the relief: coarse far-away terrain would otherwise swallow the lines
+      depthTest: false,
     });
     this.mesh = new THREE.Mesh(g, this.material);
     this.mesh.frustumCulled = false;
