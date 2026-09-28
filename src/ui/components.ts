@@ -485,9 +485,9 @@ export class Panel {
 
 // ---------------------------------------------------------------------------
 const SYMBOLS = `
-  <div class="sym"><svg viewBox="0 0 22 22" width="22" height="22"><circle cx="11" cy="11" r="8.5" fill="#f4eedf"/><circle cx="11" cy="11" r="6" fill="#cc3a22" stroke="#2a2219" stroke-width="1.4"/></svg><span>событие главы — нажмите</span></div>
-  <div class="sym"><svg viewBox="0 0 22 22" width="22" height="22"><circle cx="11" cy="11" r="4" fill="#f4eedf" stroke="#2a2219" stroke-width="1.5"/></svg><span>город</span></div>
-  <div class="sym"><svg viewBox="0 0 34 22" width="34" height="22"><path d="M2 11h20" stroke="#f4eedf" stroke-width="7"/><path d="M2 11h19" stroke="#cc3a22" stroke-width="4"/><path d="M19 4.5 31 11 19 17.5z" fill="#cc3a22" stroke="#f4eedf" stroke-width="1.2"/></svg><span>путь, поход, миссия</span></div>`;
+  <div class="sym"><svg viewBox="0 0 22 22" width="22" height="22"><circle cx="11" cy="11" r="8.5" fill="#f4eedf"/><circle cx="11" cy="11" r="6" fill="#cc3a22" stroke="#2a2219" stroke-width="1.4"/></svg><span>событие — нажмите</span></div>
+  <div class="sym"><svg viewBox="0 0 34 22" width="34" height="22"><path d="M2 11h20" stroke="#f4eedf" stroke-width="7"/><path d="M2 11h19" stroke="#cc3a22" stroke-width="4"/><path d="M19 4.5 31 11 19 17.5z" fill="#cc3a22" stroke="#f4eedf" stroke-width="1.2"/></svg><span>путь, поход, миссия</span></div>
+  <div class="sym city"><svg viewBox="0 0 22 22" width="22" height="22"><circle cx="11" cy="11" r="4" fill="#f4eedf" stroke="#2a2219" stroke-width="1.5"/></svg><span>город</span></div>`;
 
 export class Legend {
   root = el('div', 'legend');

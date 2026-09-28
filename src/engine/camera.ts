@@ -182,11 +182,12 @@ export function pickPlane(camera: THREE.Camera, ndcX: number, ndcY: number): [nu
 
 /**
  * Frame a set of map points inside the visible map, keeping the base view's angle.
- * The view only ever pulls back or pans (never zooms in past the base), so a chapter's
- * intended scale is kept while everything that happens in it stays in the picture.
+ * By default the view only pulls back or pans (never zooms in past the base), so a chapter's
+ * intended scale is kept while everything that happens in it stays in the picture;
+ * `closer` also lets it come in until the points fill the frame.
  * Margins are in pixels: [left, top, right, bottom].
  */
-export function fitView(base: View, pts: [number, number][], w: number, h: number, fov: number, m: [number, number, number, number]): View {
+export function fitView(base: View, pts: [number, number][], w: number, h: number, fov: number, m: [number, number, number, number], closer = false): View {
   if (!pts.length || w < 10 || h < 10) return base;
   const cam = new THREE.PerspectiveCamera(fov, w / h, 1, 1e6);
   const v = { ...base };
@@ -216,7 +217,13 @@ export function fitView(base: View, pts: [number, number][], w: number, h: numbe
     if (k > 1 || bh > sh) dy = (y0 + y1) / 2 - (sy0 + sy1) / 2;
     else if (y0 < sy0) dy = y0 - sy0;
     else if (y1 > sy1) dy = y1 - sy1;
-    if (k <= 1.002 && Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) break;
+    const zoomIn = closer && k < 0.985;
+    if (zoomIn) {
+      // everything fits with room to spare: centre it and come closer
+      dx = (x0 + x1) / 2 - (sx0 + sx1) / 2;
+      dy = (y0 + y1) / 2 - (sy0 + sy1) / 2;
+    }
+    if (k <= 1.002 && !zoomIn && Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) break;
     const c0 = pickPlane(cam, 0, 0);
     const c1 = pickPlane(cam, ((w / 2 + dx) / w) * 2 - 1, -(((h / 2 + dy) / h) * 2 - 1));
     if (c0 && c1) {
@@ -224,6 +231,7 @@ export function fitView(base: View, pts: [number, number][], w: number, h: numbe
       v.y += c1[1] - c0[1];
     }
     if (k > 1.002) v.dist *= Math.min(k * 1.03, 6);
+    else if (zoomIn) v.dist *= Math.max(k * 1.01, 0.5);
   }
   return v;
 }

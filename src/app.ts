@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { Stage } from './engine/stage';
 import { loadLevel, loadMeta, type Level } from './engine/assets';
 import { fitView, viewFromSpec, type View } from './engine/camera';
-import { project } from './geo/projection';
+import { project, projectRel } from './geo/projection';
 import { World, acts, chapters, events, eventById, relById, relColor, religions } from './story/world';
 import { MapControls } from './story/controls';
 import type { MarkerState } from './engine/markers';
@@ -14,7 +14,7 @@ import { el, esc } from './ui/dom';
 import { animCfg } from './ui/anim';
 import { PAPER } from './ui/palette';
 import counterJson from './data/counter.json';
-import type { Act, Chapter, EventItem } from './story/types';
+import type { Act, Chapter, EventItem, ViewJson } from './story/types';
 
 type Mode = 'intro' | 'film' | 'free';
 
@@ -25,6 +25,9 @@ const ease = (t: number) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) /
 
 /** screen margins (px) kept around a chapter's events when framing: left, top, right, bottom */
 const FRAME_MARGIN: [number, number, number, number] = [56, 60, 56, 48];
+/** chapter views at least this far away show the whole world */
+const WORLD_DIST = 40000;
+const WORLD_PTS: [number, number][] = [];
 const RIPPLE_LIFE = 1.8;
 
 export class App {
@@ -116,7 +119,7 @@ export class App {
     };
     this.timeline.onAct = (a) => {
       this.setYear(a.from + (a.id === 1 ? 0 : 1));
-      this.stage.rig.flyTo(viewFromSpec(a.view));
+      this.stage.rig.flyTo(a.view.dist >= WORLD_DIST ? this.worldView(a.view) : viewFromSpec(a.view));
     };
     this.panel.onClose = () => this.select(null);
     this.panel.onNav = (id) => this.select(id, true);
@@ -259,8 +262,22 @@ export class App {
   private chapterView(ch: Chapter, second = false): View | null {
     const spec = second ? ch.view2 : ch.view;
     if (!spec) return null;
+    if (spec.dist >= WORLD_DIST) return this.worldView(spec);
     const s = this.stage;
     return fitView(viewFromSpec(spec), this.chapterPoints(ch), s.width, s.height, s.rig.camera.fov, FRAME_MARGIN);
+  }
+
+  /** a whole-world view: the inhabited map (without Antarctica) fills the frame */
+  private worldView(spec: ViewJson): View {
+    const s = this.stage;
+    const base = viewFromSpec(spec);
+    if (!WORLD_PTS.length) {
+      for (let lat = -56; lat <= 84; lat += 10) WORLD_PTS.push(projectRel(-180, lat), projectRel(180, lat));
+      for (let l = -180; l <= 180; l += 20) WORLD_PTS.push(projectRel(l, 84), projectRel(l, -56));
+    }
+    // start from far away and let the solver bring the map in as close as it fits
+    const far = fitView({ ...base, dist: base.dist * 2 }, WORLD_PTS, s.width, s.height, s.rig.camera.fov, [28, 28, 28, 28]);
+    return fitView(far, WORLD_PTS, s.width, s.height, s.rig.camera.fov, [28, 28, 28, 28], true);
   }
 
   // ------------------------------------------------------------------ film
@@ -286,7 +303,7 @@ export class App {
       if (prev && prev.act < ch.act) {
         // the grand pull-back: the previous act shrinks into a ringed inset
         this.tweenYear(ch.years[0], 7);
-        await rig.flyTo(viewFromSpec(act.view), { duration: 7.5 });
+        await rig.flyTo(act.view.dist >= WORLD_DIST ? this.worldView(act.view) : viewFromSpec(act.view), { duration: 7.5 });
       } else {
         this.tweenYear(ch.years[0], 4);
         await rig.flyTo(this.chapterView(ch) as View, { duration: prev ? 5 : 6.5 });
@@ -310,10 +327,7 @@ export class App {
     const act = acts[ch.act - 1];
     const list = chapters.filter((c) => c.act === ch.act);
     const meta = `Акт ${act.roman} · глава ${list.indexOf(ch) + 1} из ${list.length}`;
-    const hints: string[] = [];
-    if ((ch.events ?? []).length) hints.push('Точки на карте открывают подробности.');
-    if (chapters.indexOf(ch) === 0) hints.push('Колесо мыши или ← → листают главы.');
-    this.caption.show(ch, meta, hints.join(' '));
+    this.caption.show(ch, meta, (ch.events ?? []).length ? 'Точки на карте открывают подробности' : '');
   }
 
   /** jump straight into a chapter state (for screenshots and deep links) */
@@ -484,8 +498,11 @@ export class App {
     if (!ch) return null;
     const cats = new Set<number>();
     for (const id of ch.events ?? []) {
-      const r = relById.get(eventById.get(id)?.rel ?? '');
+      const rel = eventById.get(id)?.rel ?? '';
+      const r = relById.get(rel);
       if (r) cats.add(r.zone);
+      // "Christianity" as a whole: every Christian tradition on the map is the subject
+      if (rel === 'christianity') for (const q of religions) if (q.zone >= 1 && q.zone <= 6) cats.add(q.zone);
     }
     // Islam and the caliphate's rule are one story
     if (cats.has(7)) cats.add(8);
@@ -739,7 +756,7 @@ export class App {
       const a = acts[k];
       if (this.hearthA[k] < 0.15) continue;
       const [hx, hy] = project(a.hearth.lon, a.hearth.lat);
-      labels.push({ key: 'h:' + k, x: hx, y: hy - a.hearth.r * 1.35, h: 0, text: `Акт ${a.roman} · ${a.title}`, cls: 'hearth', prio: 90, anchor: 'center', alpha: Math.min(1, this.hearthA[k] * 2) });
+      labels.push({ key: 'h:' + k, x: hx, y: hy + a.hearth.r * 1.3, h: 0, text: `Акт ${a.roman} · ${a.title}`, cls: 'hearth', prio: 90, anchor: 'center', alpha: Math.min(1, this.hearthA[k] * 2) });
     }
     this.world.setMarkers(markers);
     this.labels.root.style.opacity = this.mode === 'intro' ? '0' : '1';

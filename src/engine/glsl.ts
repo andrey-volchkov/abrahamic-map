@@ -197,6 +197,7 @@ export function mulberry32(a: number) {
   };
 }
 
+/** a colour for shader uniforms: three.js takes the hex as sRGB and stores it in linear space */
 export function hexToLinear(hex: string): THREE.Color {
-  return new THREE.Color(hex).convertSRGBToLinear();
+  return new THREE.Color(hex);
 }

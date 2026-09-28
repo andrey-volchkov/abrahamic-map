@@ -77,14 +77,16 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px s
 .free-sheet .how { font-family: var(--f-ui); font-size: 15px; line-height: 1.4; color: var(--ink-2); }
 .free-sheet .how b { color: var(--ink); font-weight: 700; }
 
-.act-sheet { display: flex; flex-direction: column; justify-content: center; }
+.act-sheet, .intro-sheet { display: flex; flex-direction: column; }
+.act-sheet > :first-child, .intro-sheet > :first-child { margin-top: auto; }
+.act-sheet > :last-child, .intro-sheet > :last-child { margin-bottom: auto; }
 .act-sheet .kick { font-family: var(--f-ui); font-size: 18px; text-transform: uppercase; letter-spacing: 0.2em; color: var(--red); }
 .act-sheet h1 { font-family: var(--f-text); font-weight: 400; font-size: clamp(48px, 4.6vw, 70px); line-height: 1; margin: 10px 0 0; }
 .act-sheet .rule { width: 64px; height: 0; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); padding-top: 3px; margin: 20px 0 18px; }
 .act-sheet .sub { font-style: italic; font-size: 21px; line-height: 1.3; color: var(--ink-2); }
 .act-sheet .range { font-family: var(--f-ui); font-size: 17px; color: var(--ink-3); margin-top: 12px; }
 
-.intro-sheet { display: flex; flex-direction: column; justify-content: center; padding-top: 0; }
+.intro-sheet { padding-top: 0; }
 .intro-sheet h1 { font-family: var(--f-text); font-weight: 400; font-size: clamp(40px, 3.6vw, 56px); line-height: 1.02; margin: 4px 0 0; }
 .intro-sheet .rule { width: 64px; height: 0; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); padding-top: 3px; margin: 20px 0 18px; }
 .intro-sheet .sub { font-style: italic; font-size: 18.5px; line-height: 1.42; color: var(--ink-2); margin: 0; }
@@ -131,7 +133,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px s
   box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--c) 70%, #000), inset 0 0 0 5px var(--c);
 }
 .legend .it i.hatch { background: repeating-linear-gradient(135deg, var(--c) 0 2.2px, color-mix(in srgb, var(--c) 12%, var(--paper)) 2.2px 6px); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--c) 70%, #000); }
-.legend .symbols { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 10px; padding-top: 8px; border-top: 1px dotted var(--rule); }
+.legend .symbols { display: flex; flex-wrap: wrap; gap: 2px 14px; margin-top: 10px; padding-top: 8px; border-top: 1px dotted var(--rule); }
 .legend .sym { display: flex; align-items: center; gap: 6px; font-family: var(--f-ui); font-size: 14px; color: var(--ink-2); }
 
 /* ---------- strip under the map ---------- */
@@ -169,14 +171,14 @@ body[data-mode='intro'] .film-bar, body[data-mode='intro'] .timeline { visibilit
 
 .timeline { flex: 1; min-width: 0; display: none; align-items: center; gap: 18px; height: 100%; }
 .timeline.on { display: flex; }
-.timeline .track { position: relative; flex: 1; height: 34px; margin-top: 6px; cursor: pointer; touch-action: none; }
+.timeline .track { position: relative; flex: 1; height: 24px; margin-top: 2px; cursor: pointer; touch-action: none; }
 .timeline .band { position: absolute; top: 0; height: 100%; border-left: 1px solid var(--rule); }
-.timeline .band .lbl { position: absolute; left: 6px; top: -21px; font-family: var(--f-ui); font-size: 14px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3); white-space: nowrap; }
+.timeline .band .lbl { position: absolute; left: 6px; top: -19px; font-family: var(--f-ui); font-size: 14px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3); white-space: nowrap; }
 .timeline .band.on .lbl { color: var(--red); }
 .timeline .axis { position: absolute; left: 0; right: 0; bottom: 0; height: 1.5px; background: var(--ink-3); }
 .timeline .tick { position: absolute; bottom: 4px; width: 4px; height: 4px; border-radius: 50%; margin-left: -2px; }
 .timeline .tick.big { width: 6px; height: 6px; margin-left: -3px; box-shadow: 0 0 0 1px var(--ink); }
-.timeline .yr { position: absolute; bottom: -19px; font-family: var(--f-ui); font-size: 13px; color: var(--ink-3); transform: translateX(-50%); white-space: nowrap; }
+.timeline .yr { position: absolute; bottom: -17px; font-family: var(--f-ui); font-size: 13px; color: var(--ink-3); transform: translateX(-50%); white-space: nowrap; }
 .timeline .handle { position: absolute; top: -4px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--red); pointer-events: none; }
 .timeline .handle::after { content: ''; position: absolute; bottom: -5px; left: -5px; width: 12px; height: 12px; border-radius: 50%; background: var(--red); box-shadow: 0 0 0 2px var(--paper); }
 
@@ -220,26 +222,36 @@ body[data-mode='intro'] .col-body { border-top: 0; }
 
 /* ---------- shorter screens ---------- */
 @media (max-height: 820px) and (min-width: 821px) {
-  :root { --mb: 76px; --mt: 18px; }
-  .col { padding: 18px 26px 16px 30px; }
+  :root { --mb: 74px; --mt: 16px; }
+  .col { padding: 16px 22px 12px 28px; }
+  .col-head { padding-bottom: 9px; }
   .brand { font-size: 19px; }
-  .act-line { font-size: 14px; margin-top: 4px; }
-  .col-year { min-height: 60px; padding: 8px 0 6px; }
-  .year .num { font-size: 40px; }
+  .act-line { font-size: 14px; margin-top: 3px; }
+  .col-year { min-height: 54px; padding: 7px 0 5px; }
+  .year .num { font-size: 38px; }
   .year .era { font-size: 15px; }
-  .counter .val { font-size: 26px; }
-  .caption h2, .free-sheet h2 { font-size: 28px; margin-bottom: 10px; }
-  .caption p, .free-sheet p { font-size: 15.5px; line-height: 1.45; margin-bottom: 8px; }
-  .caption .meta { margin-top: 8px; font-size: 14px; }
-  .sheet, .panel { padding-top: 12px; }
-  .legend .title { margin-bottom: 6px; }
-  .legend .items { gap: 5px 12px; min-height: 68px; }
-  .legend .it { font-size: 15px; }
-  .legend .it i { width: 26px; height: 17px; }
-  .legend .symbols { margin-top: 7px; padding-top: 6px; }
-  .legend .sym { font-size: 13.5px; }
+  .counter .lbl { font-size: 12px; }
+  .counter .val { font-size: 24px; }
+  .counter .yr { font-size: 12px; }
+  .counter .src { font-size: 10.5px; }
+  .caption h2, .free-sheet h2 { font-size: 27px; margin-bottom: 9px; }
+  .kicker { font-size: 14px; margin-bottom: 5px; }
+  .caption p, .free-sheet p { font-size: 15px; line-height: 1.42; margin-bottom: 7px; }
+  .caption .meta { margin-top: 6px; font-size: 13.5px; }
+  .sheet, .panel { padding-top: 10px; padding-bottom: 6px; }
+  .col-legend { padding-top: 7px; }
+  .legend .title { font-size: 12.5px; margin-bottom: 5px; }
+  .legend .items { gap: 4px 12px; min-height: 62px; }
+  .legend .it { font-size: 14.5px; }
+  .legend .it i { width: 24px; height: 15px; }
+  .legend .symbols { margin-top: 6px; padding-top: 5px; }
+  .legend .sym { font-size: 13px; gap: 4px; }
+  .legend .sym.city { display: none; }
   .panel h3 { font-size: 25px; }
   .panel .text { font-size: 15.5px; }
+  .intro-sheet h1 { font-size: 44px; }
+  .intro-sheet .sub { font-size: 17px; }
+  .act-sheet h1 { font-size: 52px; }
 }
 
 /* ---------- phones and narrow windows: map above, text below ---------- */
@@ -270,8 +282,7 @@ body[data-mode='intro'] .col-body { border-top: 0; }
   .map-foot { left: 0; right: 0; height: var(--mb); padding: 0 12px; gap: 12px; border-top: 1px solid var(--rule); background: var(--paper); }
   .modes { gap: 10px; }
   .modes button { font-size: 14px; }
-  .modes button:nth-child(3) { display: none; }
-  .chapters .act-group .lbl { display: none; }
+  .chapters { display: none; }
   .film-bar { gap: 10px; }
   .btn { width: 32px; height: 32px; }
   .btn.play { width: 38px; height: 38px; }

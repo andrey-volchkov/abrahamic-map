@@ -10,7 +10,7 @@ page.on('pageerror', (e) => errors.push(e.message));
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text().slice(0, 300)); });
 await page.goto(url + (url.includes('?') ? '&' : '?') + 'step=0.25');
 await page.waitForFunction('window.__ready === true', null, { timeout: 180000 });
-await page.click('.intro .go');
+await page.click('.intro-sheet .go');
 await page.waitForTimeout(6000);
 const s1 = await page.evaluate(() => ({ mode: window.app.mode, i: window.app.film.i, phase: window.app.film.phase }));
 for (let k = 0; k < 3; k++) { await page.keyboard.press('ArrowRight'); await page.waitForTimeout(1500); }

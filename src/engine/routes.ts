@@ -198,8 +198,8 @@ export class Ribbon {
       uniforms: {
         ...tu,
         ...shared,
-        uColor: { value: new THREE.Color(o.color ?? '#cc3a22').convertSRGBToLinear() },
-        uCaseColor: { value: new THREE.Color(PAPER).convertSRGBToLinear() },
+        uColor: { value: new THREE.Color(o.color ?? '#cc3a22') },
+        uCaseColor: { value: new THREE.Color(PAPER) },
         uWidth: { value: o.width ?? 3 },
         uCase: { value: o.casing ?? 0 },
         uArrow: { value: o.arrow ?? 0 },

@@ -149,7 +149,11 @@ void main() {
     if (w.w > 0.0) s.gb += w.w * bathyGrad(uH2, uR2, uT2, vMap, fp);
   }
   float hSea = s.h;
-  if (w.w > 0.0 && s.coast < 3.0 * fp) hSea = mix(s.h, textureLod(uH2, lvlUV(uR2, vMap), log2(max(fp / uT2.z, 1.0))).r, w.w);
+  if (w.w > 0.0 && s.coast < 3.0 * fp) {
+    float h2 = textureLod(uH2, lvlUV(uR2, vMap), log2(max(fp / uT2.z, 1.0))).r;
+    float h3 = textureLod(uH3, lvlUV(uR3, vMap), log2(max(fp / uT3.z, 1.0))).r;
+    hSea = s.h + w.w * (h2 - h3);
+  }
   // SDFs are clamped to ±8 texels; beyond ~3 texels per pixel they lose meaning
   float fpc = min(fp, 3.0 * s.k);
   float sdfValid = 1.0 - smoothstep(1.5 * s.k, 3.0 * s.k, fp);
@@ -220,12 +224,16 @@ void main() {
   wc *= 0.97 + 0.05 * clamp((dot(Nb, L) - L.y) * 4.0 + 0.5, 0.0, 1.0);
   float cd = -s.coast; // km offshore
   // coastal tint and engraved water lines (a nineteenth-century atlas habit)
+  // the coast distance field is clamped at 8 texels: nothing offshore may depend on values
+  // near that limit, or the edge of a finer data level shows up in the open sea
+  float sdfMax = 8.0 * s.k;
+  float sdfIn = 1.0 - smoothstep(0.55 * sdfMax, 0.8 * sdfMax, cd);
   vec3 lineCol = hex(92.0, 142.0, 176.0);
-  float band = (1.0 - smoothstep(0.0, 9.0 * fp, cd)) * sdfValid;
+  float band = (1.0 - smoothstep(0.0, min(9.0 * fp, 0.7 * sdfMax), cd)) * sdfValid * sdfIn;
   wc = mix(wc, hex(160.0, 200.0, 222.0), band * 0.55);
   float spacing = max(fp * 5.0, 0.6);
   float line = abs(fract(cd / spacing - 0.5) - 0.5) * spacing / fp;
-  float lines = (1.0 - smoothstep(0.3, 0.9, line)) * (1.0 - smoothstep(spacing * 0.8, spacing * 3.4, cd)) * step(spacing * 0.5, cd);
+  float lines = (1.0 - smoothstep(0.3, 0.9, line)) * (1.0 - smoothstep(spacing * 0.8, spacing * 3.4, cd)) * step(spacing * 0.5, cd) * sdfIn;
   vec3 water = mix(wc, lineCol, lines * 0.35 * sdfValid);
 
   // lakes
@@ -263,9 +271,9 @@ void main() {
   // ---- focus: the rest of the map recedes towards the paper ---------------
   if (uFocus.w > 0.0) {
     float fd = distance(vMap, uFocus.xy) / uFocus.z;
-    float out_ = smoothstep(0.8, 1.9, fd) * uFocus.w;
+    float out_ = smoothstep(1.0, 2.2, fd) * uFocus.w;
     float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
-    c = mix(c, mix(vec3(lum), uPaper, 0.55), out_ * 0.6);
+    c = mix(c, mix(vec3(lum), uPaper, 0.5), out_ * 0.38);
   }
 
   // ---- neatline of the projection and aerial perspective ------------------

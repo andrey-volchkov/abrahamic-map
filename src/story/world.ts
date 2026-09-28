@@ -203,7 +203,7 @@ export class World {
   color(hex: string) {
     let c = this.colorCache.get(hex);
     if (!c) {
-      c = new THREE.Color(hex).convertSRGBToLinear();
+      c = new THREE.Color(hex); // hex is sRGB; three.js stores it linear
       this.colorCache.set(hex, c);
     }
     return c;

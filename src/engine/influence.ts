@@ -61,18 +61,24 @@ vec3 applyZones(vec3 col, vec2 p, float fp, float landCover, float shade) {
   if (m1 > 0.05) {
     float f = m1 - T;
     vec2 g = vec2(solidAt(im, uv + ex) - solidAt(im, uv - ex), solidAt(im, uv + ey) - solidAt(im, uv - ey));
-    float dpx = f / max(length(g) * perPx, 1e-5);
-    float inside = clamp(dpx + 0.5, 0.0, 1.0);
+    // distance to the outer contour, px (positive inside)
+    float dOut = f / max(length(g) * perPx, 1e-5);
+    float dpx = dOut;
+    // where a second tradition is present too, the border between them counts as an edge:
+    // each side keeps its own colour and ribbon, no mixing of inks
+    if (m2 > T - 0.05) {
+      vec2 g2 = vec2(solidAt(i2, uv + ex) - solidAt(i2, uv - ex), solidAt(i2, uv + ey) - solidAt(i2, uv - ey));
+      float dShare = (m1 - m2) / max(length(g - g2) * perPx, 1e-5);
+      dpx = mix(dpx, min(dpx, dShare), smoothstep(T - 0.05, T + 0.02, m2) * smoothstep(T, T + 0.02, m1));
+    }
+    float inside = clamp(dOut + 0.5, 0.0, 1.0);
     float emph = uZoneEmph[im];
     vec3 zc = uZoneCol[im];
-    // where two traditions share ground about equally, the tint leans towards the second
-    float share = 1.0 - smoothstep(0.0, 0.2, (m1 - m2) / max(m1, 1e-3));
-    zc = mix(zc, uZoneCol[i2], share * 0.5 * step(T, m2) * uZoneEmph[i2]);
     // background traditions: a paler tint of their own hue, partly transparent
     float bandW = uZoneBand * mix(0.5, 1.0, emph);
     float band = 1.0 - smoothstep(bandW * 0.45, bandW, dpx);
     // flat light tint inside, a strong ribbon along the edge, relief shading on top
-    vec3 tint = inkTint(zc, mix(uZoneFill * mix(0.6, 1.0, emph), mix(0.5, 0.85, emph), band)) * shade;
+    vec3 tint = inkTint(zc, mix(uZoneFill * mix(0.6, 1.0, emph), mix(0.45, 0.72, emph), band)) * shade;
     float cover = mix(mix(0.55, 0.92, emph) * uZoneFillK, mix(0.6, 0.96, emph), band);
     col = mix(col, tint, inside * cover * k);
     // the contour itself
@@ -229,7 +235,7 @@ export class Influence {
   }
 
   setColors(colors: string[]) {
-    colors.forEach((c, i) => this.zu.uZoneCol.value[i].set(c).convertSRGBToLinear());
+    colors.forEach((c, i) => this.zu.uZoneCol.value[i].set(c));
   }
 
   /** place the field window around the view; cx, cy = map point, size = window size in km */
