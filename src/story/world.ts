@@ -5,6 +5,7 @@ import { project } from '../geo/projection';
 import type { Stage } from '../engine/stage';
 import { Ribbon, smoothPath } from '../engine/routes';
 import { Markers, type MarkerState } from '../engine/markers';
+import { Particles, type Particle } from '../engine/particles';
 import type { Splat } from '../engine/influence';
 import { dataUrl } from '../engine/assets';
 import type { Act, Chapter, EventItem, Hearth, Place, Religion, Route } from './types';
@@ -55,9 +56,17 @@ export interface PlaceView extends Place {
   y: number;
 }
 
+interface RoutePath {
+  pts: [number, number][];
+  cum: number[];
+  total: number;
+  arc: number;
+}
+
 interface RouteView {
   data: Route;
   ribbons: Ribbon[];
+  paths: RoutePath[];
   color: string;
 }
 
@@ -129,6 +138,7 @@ export class World {
       const color = r.color ?? relColor(r.rel);
       const lines = (r as Route & { lines?: [number, number][][] }).lines ?? [r.pts];
       const ribbons: Ribbon[] = [];
+      const paths: RoutePath[] = [];
       for (const ln of lines) {
         const proj = ln.map(([lon, lat]) => project(lon, lat));
         // split where a line crosses the map's cut meridian
@@ -155,13 +165,18 @@ export class World {
           rb.mesh.visible = false;
           stage.scene.add(rb.mesh);
           ribbons.push(rb);
+          const cum = [0];
+          for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+          paths.push({ pts, cum, total: cum[cum.length - 1], arc: rb.material.uniforms.uArc.value as number });
         }
       }
-      this.routes.set(r.id, { data: r, ribbons, color });
+      this.routes.set(r.id, { data: r, ribbons, paths, color });
     }
 
     this.markers = new Markers(stage.tu, { uTime: stage.light.uTime, uViewport: this.viewport, uPxK: this.pxK });
     stage.scene.add(this.markers.mesh);
+    this.particles = new Particles(this.viewport);
+    stage.scene.add(this.particles.mesh);
     this.loadRivers(shared);
   }
 
@@ -187,6 +202,59 @@ export class World {
   }
 
   pxK: { value: number };
+  particles: Particles;
+  private plist: Particle[] = [];
+
+  /** particles streaming along visible routes */
+  updateParticles(time: number, dist: number, pxAt: (x: number, y: number) => number, hAt: (x: number, y: number) => number) {
+    const out = this.plist;
+    let n = 0;
+    const speed = dist * 0.045; // km per second, roughly screen-constant
+    const spacing = dist * 0.1;
+    for (const rv of this.routes.values()) {
+      if (rv.data.kind === 'road') continue;
+      const rb = rv.ribbons[0];
+      if (!rb) continue;
+      const op = rb.material.uniforms.uOpacity.value as number;
+      if (op < 0.3) continue;
+      const prog = rb.material.uniforms.uProgress.value as number;
+      const col = this.color(rv.color);
+      rv.paths.forEach((path) => {
+        const shown = path.total * prog;
+        if (shown < 1) return;
+        const k = Math.max(2, Math.min(16, Math.round(path.total / spacing)));
+        for (let i = 0; i < k; i++) {
+          const d = ((time * speed + (i / k) * path.total) % path.total + path.total) % path.total;
+          if (d > shown) continue;
+          // position along the polyline
+          let lo = 0, hi = path.cum.length - 1;
+          while (hi - lo > 1) {
+            const m = (lo + hi) >> 1;
+            if (path.cum[m] < d) lo = m;
+            else hi = m;
+          }
+          const seg = path.cum[hi] - path.cum[lo] || 1;
+          const f = (d - path.cum[lo]) / seg;
+          const x = path.pts[lo][0] + (path.pts[hi][0] - path.pts[lo][0]) * f;
+          const y = path.pts[lo][1] + (path.pts[hi][1] - path.pts[lo][1]) * f;
+          const t = d / path.total;
+          const h = path.arc > 0 ? path.arc * 4 * t * (1 - t) + 1 : hAt(x, y) + pxAt(x, y) * 2.5;
+          const edge = Math.min(1, t * 12, (1 - t) * 12, (shown - d) / Math.max(1, spacing * 0.3));
+          let p = out[n];
+          if (!p) p = out[n] = { x: 0, h: 0, y: 0, size: 0, color: col, alpha: 0 };
+          p.x = x;
+          p.h = h;
+          p.y = y;
+          p.size = rv.data.kind === 'journey' ? 9 : 11;
+          p.color = col;
+          p.alpha = Math.max(0, edge) * op * (rv.data.kind === 'journey' ? 0.65 : 0.9);
+          n++;
+        }
+      });
+    }
+    out.length = n;
+    this.particles.set(out);
+  }
   viewport = { value: new THREE.Vector2(1, 1) };
 
   color(hex: string) {

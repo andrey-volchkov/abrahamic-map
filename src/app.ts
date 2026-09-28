@@ -446,7 +446,7 @@ export class App {
     const act = this.currentAct();
     // caption keeps the subject clear of the text column
     const worldK = Math.min(1, Math.max(0, (rig.view.dist - 12000) / 20000));
-    const wantShift = this.mode === 'film' && !this.titleOn && window.innerWidth > 820 ? 0.13 - 0.06 * worldK : 0;
+    const wantShift = this.mode === 'film' && !this.titleOn && window.innerWidth > 820 ? 0.13 - 0.03 * worldK : 0;
     rig.shift += (wantShift - rig.shift) * Math.min(1, dt * 1.5);
     if (REDUCED) {
       rig.drift.heading = 0;
@@ -628,6 +628,14 @@ export class App {
       const [hx, hy] = project(a.hearth.lon, a.hearth.lat);
       labels.push({ key: 'h:' + k, x: hx, y: hy - a.hearth.r * 0.9, h: 0, text: `Акт ${a.roman} · ${a.title}`, cls: 'hearth', prio: 90, anchor: 'center', alpha: Math.min(1, this.hearthA[k] * 2.2) });
     }
+    const pxk = this.world.pxK.value;
+    const camPos = cam.position;
+    this.world.updateParticles(
+      s.time,
+      v.dist,
+      (x, y) => pxk * Math.hypot(camPos.x - x, camPos.y, camPos.z + y),
+      ht,
+    );
     this.world.setMarkers(markers);
     // keep labels clear of the interface
     const block: [number, number, number, number][] = [];
