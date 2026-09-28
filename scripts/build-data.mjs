@@ -38,6 +38,7 @@ const LEVELS = [
   { id: 'L0', world: true, W: 4096, zoom: 5, ss: 2, q: 8, qSea: 80 },
   { id: 'L1', bbox: [-26, 22, 66, 72], k: 3.0, zoom: 6, ss: 2, q: 4, qSea: 40 },
   { id: 'L2', bbox: [24, 19, 52, 42], k: 1.2, zoom: 7, ss: 1, q: 2, qSea: 20 },
+  { id: 'L3', bbox: [33.9, 29.3, 36.9, 34.0], k: 0.4, zoom: 9, ss: 1, q: 1, qSea: 10 },
 ];
 
 function levelGrid(L) {

@@ -8,7 +8,7 @@ import type { HeightField } from './assets';
 import { ZONE_GLSL, type ZoneUniforms } from './influence';
 
 const GRID_N = 32;
-const LODS = 10;
+const LODS = 11;
 const ROOT = 17300; // km, two roots cover the map
 const MAX_INST = 2400;
 
@@ -120,17 +120,19 @@ void main() {
   vec2 dpx = dFdx(vMap), dpy = dFdy(vMap);
   float fp = max(length(dpx), length(dpy)); // km per pixel
 
-  vec3 w = levelWeights(vMap);
+  vec4 w = levelWeights(vMap);
   S s = S(0.0, vec2(0.0), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, vec2(0.0), 0.0);
   vec2 sun2 = normalize(vec2(uSunDir.x, -uSunDir.z));
   vec2 sunOff = sun2 * fp * 2.6;
   if (w.x > 0.0) samp(uH0, uM0, uL0, uR0, uT0, vMap, fp, w.x, sunOff, s);
   if (w.y > 0.0) samp(uH1, uM1, uL1, uR1, uT1, vMap, fp, w.y, sunOff, s);
   if (w.z > 0.0) samp(uH2, uM2, uL2, uR2, uT2, vMap, fp, w.z, sunOff, s);
+  if (w.w > 0.0) samp(uH3, uM3, uL3, uR3, uT3, vMap, fp, w.w, sunOff, s);
   if (s.coast < 3.0 * fp) {
     if (w.x > 0.0) s.gb += w.x * bathyGrad(uH0, uR0, uT0, vMap, fp);
     if (w.y > 0.0) s.gb += w.y * bathyGrad(uH1, uR1, uT1, vMap, fp);
     if (w.z > 0.0) s.gb += w.z * bathyGrad(uH2, uR2, uT2, vMap, fp);
+    if (w.w > 0.0) s.gb += w.w * bathyGrad(uH3, uR3, uT3, vMap, fp);
   }
   // SDFs are clamped to ±8 texels; beyond ~3 texels per pixel they lose meaning
   float fpc = min(fp, 3.0 * s.k);
@@ -278,7 +280,7 @@ void main() {
   c = mix(c, uHaze, haze * 0.32);
 
   if (uDebug == 1) c = vec3(max(h, 0.0) / 3000.0, max(-h, 0.0) / 6000.0, 0.0);
-  if (uDebug == 2) c = w;
+  if (uDebug == 2) c = w.rgb + vec3(w.w);
   if (uDebug == 3) c = vec3(lakeCov, cover, s.arid);
   if (uDebug == 4) c = N * 0.5 + 0.5;
   fragColor = vec4(c, 1.0);

@@ -47,7 +47,7 @@ export class Stage {
   width = 1;
   height = 1;
   running = true;
-  hasLevel = { L1: false, L2: false };
+  hasLevel = { L1: false, L2: false, L3: false };
   quality = { adaptive: true };
   splats: Splat[] = [];
 
@@ -115,14 +115,14 @@ export class Stage {
     window.addEventListener('resize', () => this.resize());
   }
 
-  addLevel(slot: 0 | 1 | 2, L: Level) {
+  addLevel(slot: 0 | 1 | 2 | 3, L: Level) {
     const u = this.tu;
-    const H = [u.uH0, u.uH1, u.uH2][slot], M = [u.uM0, u.uM1, u.uM2][slot], Lk = [u.uL0, u.uL1, u.uL2][slot];
-    const Rr = [u.uR0, u.uR1, u.uR2][slot], T = [u.uT0, u.uT1, u.uT2][slot];
+    const H = [u.uH0, u.uH1, u.uH2, u.uH3][slot], M = [u.uM0, u.uM1, u.uM2, u.uM3][slot], Lk = [u.uL0, u.uL1, u.uL2, u.uL3][slot];
+    const Rr = [u.uR0, u.uR1, u.uR2, u.uR3][slot], T = [u.uT0, u.uT1, u.uT2, u.uT3][slot];
     H.value = L.hTex;
     M.value = L.mTex;
     // lake SDF (R) + baked soft shadows of the relief (G)
-    Lk.value = bakeShadows(this.renderer, L.hTex, L.lTex, L.W, L.H, L.k, this.light.uSunDir.value, [20, 13, 10][slot]);
+    Lk.value = bakeShadows(this.renderer, L.hTex, L.lTex, L.W, L.H, L.k, this.light.uSunDir.value, [20, 13, 10, 8][slot]);
     L.lTex.dispose();
     Rr.value.set(L.x0, L.y0, L.W * L.k, L.H * L.k);
     T.value.set(1 / L.W, 1 / L.H, L.k);
@@ -130,6 +130,7 @@ export class Stage {
     if (slot === 0) this.terrain.buildBounds(this.heights);
     if (slot === 1) this.hasLevel.L1 = true;
     if (slot === 2) this.hasLevel.L2 = true;
+    if (slot === 3) this.hasLevel.L3 = true;
   }
 
   onFrame(fn: (dt: number) => void) {
@@ -189,6 +190,7 @@ export class Stage {
     u.uExag.value = Stage.exaggeration(v.dist);
     u.uHas.value.x = Math.min(1, u.uHas.value.x + (this.hasLevel.L1 ? dt * 1.5 : 0));
     u.uHas.value.y = Math.min(1, u.uHas.value.y + (this.hasLevel.L2 ? dt * 1.5 : 0));
+    u.uHas.value.z = Math.min(1, u.uHas.value.z + (this.hasLevel.L3 ? dt * 1.5 : 0));
     this.light.uTime.value = this.time;
     this.light.uCamDist.value = v.dist;
     this.light.uShadeExag.value = 8 + 6.5 * Math.pow(v.dist / 1000, 0.42);

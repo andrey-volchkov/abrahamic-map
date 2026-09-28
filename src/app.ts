@@ -41,7 +41,7 @@ export class App {
   private hearthA = [0, 0, 0];
   private chapterEvents = new Set<string>();
   private seenEvents = new Map<string, number>();
-  private levelsReady = { L0: false, L1: false, L2: false };
+  private levelsReady = { L0: false, L1: false, L2: false, L3: false };
   private titleOn = false;
   controls: MapControls;
 
@@ -143,18 +143,20 @@ export class App {
     s.start();
     const meta = await loadMeta();
     this.intro.progress(0.08, 'Загрузка рельефа мира');
-    const add = (slot: 0 | 1 | 2, L: Level) => {
+    const add = (slot: 0 | 1 | 2 | 3, L: Level) => {
       s.addLevel(slot, L);
-      this.levelsReady[L.id as 'L0' | 'L1' | 'L2'] = true;
+      this.levelsReady[L.id as 'L0' | 'L1' | 'L2' | 'L3'] = true;
     };
     const l0 = loadLevel('L0', meta.levels.L0).then((L) => {
       add(0, L);
       this.intro.progress(0.5, 'Загрузка рельефа Ближнего Востока');
     });
     const l2 = loadLevel('L2', meta.levels.L2);
+    const l3 = loadLevel('L3', meta.levels.L3);
     const l1 = loadLevel('L1', meta.levels.L1);
     await l0;
     add(2, await l2);
+    add(3, await l3);
     this.world = new World(s);
     this.intro.progress(0.8, 'Загрузка рельефа Европы');
     this.intro.ready();
@@ -351,7 +353,40 @@ export class App {
       this.tooltip.innerHTML = `<small>${esc(e.date)}</small>${esc(e.title)}`;
       this.tooltip.style.transform = `translate(${x + 14}px, ${y + 12}px)`;
       this.tooltip.classList.add('on');
+      return;
+    }
+    const zone = this.mode === 'free' ? this.zoneAt(x, y) : null;
+    if (zone) {
+      this.tooltip.innerHTML = zone;
+      this.tooltip.style.transform = `translate(${x + 14}px, ${y + 12}px)`;
+      this.tooltip.classList.add('on');
     } else this.tooltip.classList.remove('on');
+  }
+
+  /** which tradition's zone lies under a screen point (same kernel as the GPU field) */
+  private zoneAt(x: number, y: number): string | null {
+    const r = this.stage.canvas.getBoundingClientRect();
+    const p = this.stage.rig.pick(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1);
+    if (!p || this.stage.heights.sample(p[0], p[1]) <= 0) return null;
+    const f = new Float32Array(12);
+    for (const s of this.stage.splats) {
+      const d2 = ((p[0] - s.x) ** 2 + (p[1] - s.y) ** 2) / (s.r * s.r);
+      if (d2 < 9) f[s.cat] += s.a * Math.exp(-0.693 * d2);
+    }
+    let bi = -1, bv = 0.5, hi = -1, hv = 0.5;
+    for (let i = 0; i < 8; i++) if (f[i] > bv) { bv = f[i]; bi = i; }
+    for (let i = 8; i < 12; i++) if (f[i] > hv) { hv = f[i]; hi = i; }
+    const name = (z: number) => religions.find((q) => q.zone === z);
+    const parts: string[] = [];
+    if (bi >= 0) {
+      const q = name(bi)!;
+      parts.push(`<small>зона влияния</small>${esc(q.name)}${q.note ? `<br><span style="color:var(--ink-3);font-size:12px">${esc(q.note)}</span>` : ''}`);
+    }
+    if (hi >= 0) {
+      const q = name(hi)!;
+      parts.push(`<small>${bi >= 0 ? 'и одновременно' : 'зона'}</small>${esc(q.name)}${q.note ? `<br><span style="color:var(--ink-3);font-size:12px">${esc(q.note)}</span>` : ''}`);
+    }
+    return parts.length ? parts.join('<div style="height:8px"></div>') : null;
   }
 
   private key = (e: KeyboardEvent) => {
