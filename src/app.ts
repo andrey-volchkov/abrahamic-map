@@ -387,7 +387,8 @@ export class App {
     const rig = this.stage.rig;
     const act = this.currentAct();
     // caption keeps the subject clear of the text column
-    const wantShift = this.mode === 'film' && !this.titleOn && window.innerWidth > 820 ? 0.13 : 0;
+    const worldK = Math.min(1, Math.max(0, (rig.view.dist - 12000) / 20000));
+    const wantShift = this.mode === 'film' && !this.titleOn && window.innerWidth > 820 ? 0.13 - 0.06 * worldK : 0;
     rig.shift += (wantShift - rig.shift) * Math.min(1, dt * 1.5);
     if (this.mode === 'film') {
       const d = Math.sin(this.stage.time * 0.11) * 0.8 + Math.sin(this.stage.time * 0.047) * 0.5;
@@ -431,6 +432,8 @@ export class App {
     }
 
     this.yearEl.set(this.year);
+    const hideYear = this.mode === 'film' && !!ch?.noYear;
+    this.yearEl.root.style.visibility = hideYear ? 'hidden' : 'visible';
     this.timeline.set(this.year, act.id);
     this.header.setAct(act);
     this.counter.update(this.year, act.id === 3 || (this.mode === 'free' && this.year >= 1900));
@@ -439,12 +442,13 @@ export class App {
     const v = rig.view;
     // zones step back at close range, where the relief itself tells the story
     this.stage.zu.uZoneOn.value = 0.5 + 0.5 * Math.min(1, Math.max(0, (v.dist - 500) / 1300));
+    this.stage.zu.uZoneFill.value = 0.36 + 0.2 * Math.min(1, Math.max(0, (v.dist - 9000) / 25000));
     if (this.world.rivers) {
       const u = this.world.rivers.material.uniforms;
       u.uRankFade.value = v.dist < 1400 ? 8.5 : v.dist < 4000 ? 6.5 : v.dist < 12000 ? 4.5 : 2.5;
       u.uOpacity.value = v.dist < 20000 ? 0.75 : 0.45;
     }
-    const tilt = this.mode === 'film' ? 0.5 : 0.78;
+    const tilt = (this.mode === 'film' ? 0.5 : 0.78) + 0.2 * Math.min(1, Math.max(0, (v.dist - 15000) / 25000));
     this.stage.tilt.focusArea += (tilt - this.stage.tilt.focusArea) * Math.min(1, dt * 2);
     void v;
   };

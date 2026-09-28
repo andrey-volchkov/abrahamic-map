@@ -48,6 +48,8 @@ export interface Chapter {
   focus?: { lon: number; lat: number; r: number };
   /** seconds the chapter plays before advancing */
   dur?: number;
+  /** hide the year counter (undated tradition) */
+  noYear?: boolean;
 }
 
 export interface EventItem {

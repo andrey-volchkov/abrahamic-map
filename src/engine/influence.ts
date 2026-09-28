@@ -13,6 +13,7 @@ uniform vec4 uZoneWin;              // x0, y0 (south-west), size km, 1/size
 uniform vec3 uZoneCol[${ZONE_CATS}];
 uniform float uZoneStyle[${ZONE_CATS}]; // 0 solid, 1 hatched
 uniform float uZoneOn;
+uniform float uZoneFill;
 uniform sampler2D uZNoise;
 
 vec3 applyZones(vec3 c, vec2 p, float fp, float landCover, float time) {
@@ -41,10 +42,10 @@ vec3 applyZones(vec3 c, vec2 p, float fp, float landCover, float time) {
     zc = mix(zc, uZoneCol[i2], share * 0.5 * step(T, m2));
     // tint that keeps the relief: hue from the zone colour, luminance from the model
     float zl = max(dot(zc, vec3(0.2126, 0.7152, 0.0722)), 1e-3);
-    vec3 wash = c * mix(vec3(1.0), zc / zl, 0.85) * 1.04;
+    vec3 wash = c * mix(vec3(1.0), zc / zl, 0.62) * 1.03;
     // watercolour: pigment pools towards the edge, the interior stays light
     float inner = smoothstep(T, T + 0.5, m1);
-    float fill = mix(0.75, 0.42, inner);
+    float fill = mix(0.72, uZoneFill, inner);
     c = mix(c, wash, pres * fill * landCover * uZoneOn);
     float rim = 1.0 - smoothstep(0.0, aa * 2.6, abs(m1 - T));
     c += zc * rim * 0.5 * landCover * uZoneOn;
@@ -137,6 +138,7 @@ export function createZoneUniforms(noise: THREE.Texture) {
     uZoneCol: { value: cols },
     uZoneStyle: { value: style },
     uZoneOn: { value: 1 },
+    uZoneFill: { value: 0.36 },
     uZNoise: { value: noise },
   };
 }

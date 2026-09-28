@@ -86,10 +86,6 @@ void samp(sampler2D H, sampler2D M, sampler2D L, vec4 R, vec3 T, vec2 p, float f
   float hb = textureLod(H, uv, lod + 3.5).r;
   // coast distance at a point offset towards the sun: land there shades the water here
   float sh = textureLod(M, lvlUV(R, p + sunOff), lod).r;
-  // smoothed bathymetry gradient
-  float lb = lod + 1.5;
-  vec2 gb = vec2(textureLod(H, uv + du * 2.0, lb).r - textureLod(H, uv - du * 2.0, lb).r,
-                 textureLod(H, uv - dv * 2.0, lb).r - textureLod(H, uv + dv * 2.0, lb).r) / (4.0 * st);
   s.h += w * hc;
   s.g += w * vec2(hx1 - hx0, hn - hs) / (2.0 * st);
   s.coast += w * sdfKm(m.r, k);
@@ -99,7 +95,16 @@ void samp(sampler2D H, sampler2D M, sampler2D L, vec4 R, vec3 T, vec2 p, float f
   s.hb += w * hb;
   s.k += w * k;
   s.shade += w * sdfKm(sh, k);
-  s.gb += w * gb;
+}
+
+// smoothed bathymetry gradient (only evaluated for water pixels)
+vec2 bathyGrad(sampler2D H, vec4 R, vec3 T, vec2 p, float fp) {
+  vec2 uv = lvlUV(R, p);
+  float st = max(T.z, fp);
+  float lb = log2(max(fp / T.z, 1.0)) + 1.5;
+  vec2 du = vec2(st / R.z, 0.0), dv = vec2(0.0, st / R.w);
+  return vec2(textureLod(H, uv + du * 2.0, lb).r - textureLod(H, uv - du * 2.0, lb).r,
+              textureLod(H, uv - dv * 2.0, lb).r - textureLod(H, uv + dv * 2.0, lb).r) / (4.0 * st);
 }
 
 float noiseAt(vec2 p, float scaleKm, int ch) {
@@ -122,6 +127,11 @@ void main() {
   if (w.x > 0.0) samp(uH0, uM0, uL0, uR0, uT0, vMap, fp, w.x, sunOff, s);
   if (w.y > 0.0) samp(uH1, uM1, uL1, uR1, uT1, vMap, fp, w.y, sunOff, s);
   if (w.z > 0.0) samp(uH2, uM2, uL2, uR2, uT2, vMap, fp, w.z, sunOff, s);
+  if (s.coast < 3.0 * fp) {
+    if (w.x > 0.0) s.gb += w.x * bathyGrad(uH0, uR0, uT0, vMap, fp);
+    if (w.y > 0.0) s.gb += w.y * bathyGrad(uH1, uR1, uT1, vMap, fp);
+    if (w.z > 0.0) s.gb += w.z * bathyGrad(uH2, uR2, uT2, vMap, fp);
+  }
   // SDFs are clamped to ±8 texels; beyond ~3 texels per pixel they lose meaning
   float fpc = min(fp, 3.0 * s.k);
   float sdfValid = 1.0 - smoothstep(1.5 * s.k, 3.0 * s.k, fp);
@@ -294,7 +304,7 @@ export class Terrain {
   private projScreen = new THREE.Matrix4();
   private maxGrid: Float32Array | null = null;
   private maxGridDims = { w: 0, h: 0, cell: 0 };
-  detail = 7.5; // range factor: larger → more triangles
+  detail = 11; // range factor: larger → more triangles
   lastCount = 0;
 
   constructor(
