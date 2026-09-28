@@ -15,6 +15,7 @@ uniform float uZoneStyle[${ZONE_CATS}]; // 0 solid, 1 hatched
 uniform float uZoneOn;
 uniform float uZoneFill;
 uniform float uZoneFillK;
+uniform float uZoneSat;
 uniform sampler2D uNoise;
 
 vec3 applyZones(vec3 c, vec2 p, float fp, float landCover, float time) {
@@ -43,7 +44,8 @@ vec3 applyZones(vec3 c, vec2 p, float fp, float landCover, float time) {
     zc = mix(zc, uZoneCol[i2], share * 0.5 * step(T, m2));
     // tint that keeps the relief: hue from the zone colour, luminance from the model
     float zl = max(dot(zc, vec3(0.2126, 0.7152, 0.0722)), 1e-3);
-    vec3 wash = c * mix(vec3(1.0), zc / zl, 0.62) * 1.03;
+    // hue of the tradition at the model's own luminance: relief stays, colour reads clearly
+    vec3 wash = mix(c, vec3(lum) * mix(vec3(1.0), zc / zl, uZoneSat), 0.85) * 1.04;
     // watercolour: pigment pools towards the edge, the interior stays light
     float inner = smoothstep(T, T + 0.5, m1);
     float fill = mix(0.72, uZoneFill, inner);
@@ -141,6 +143,7 @@ export function createZoneUniforms() {
     uZoneOn: { value: 1 },
     uZoneFill: { value: 0.36 },
     uZoneFillK: { value: 1 },
+    uZoneSat: { value: 0.55 },
   };
 }
 export type ZoneUniforms = ReturnType<typeof createZoneUniforms>;

@@ -504,7 +504,9 @@ export class App {
     // zones step back at close range, where the relief itself tells the story
     this.stage.zu.uZoneOn.value = 0.6 + 0.4 * Math.min(1, Math.max(0, (v.dist - 500) / 1300));
     this.stage.zu.uZoneFillK.value = 0.2 + 0.8 * Math.min(1, Math.max(0, (v.dist - 450) / 1400));
-    this.stage.zu.uZoneFill.value = 0.36 + 0.2 * Math.min(1, Math.max(0, (v.dist - 9000) / 25000));
+    const wk = Math.min(1, Math.max(0, (v.dist - 9000) / 25000));
+    this.stage.zu.uZoneFill.value = 0.36 + 0.2 * wk;
+    this.stage.zu.uZoneSat.value = 0.5 + 0.3 * wk;
     if (this.world.rivers) {
       const u = this.world.rivers.material.uniforms;
       u.uRankFade.value = v.dist < 1400 ? 8.5 : v.dist < 4000 ? 6.5 : v.dist < 12000 ? 4.5 : 2.5;
