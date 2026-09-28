@@ -1,0 +1,33 @@
+// End-to-end smoke test: intro → film → chapter navigation → free mode → panel. Reports JS errors.
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const pw = require('/opt/node22/lib/node_modules/playwright');
+const url = process.argv[2] || 'http://127.0.0.1:5173/';
+const browser = await pw.chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+const errors = [];
+page.on('pageerror', (e) => errors.push(e.message));
+page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text().slice(0, 300)); });
+await page.goto(url + (url.includes('?') ? '&' : '?') + 'step=0.25');
+await page.waitForFunction('window.__ready === true', null, { timeout: 180000 });
+await page.click('.intro .go');
+await page.waitForTimeout(6000);
+const s1 = await page.evaluate(() => ({ mode: window.app.mode, i: window.app.film.i, phase: window.app.film.phase }));
+for (let k = 0; k < 3; k++) { await page.keyboard.press('ArrowRight'); await page.waitForTimeout(1500); }
+const s2 = await page.evaluate(() => ({ i: window.app.film.i, phase: window.app.film.phase, year: Math.round(window.app.year) }));
+await page.evaluate(() => window.app.select('temple70'));
+await page.waitForTimeout(800);
+const panel = await page.evaluate(() => document.querySelector('.panel').classList.contains('on'));
+await page.keyboard.press('Escape');
+await page.click('.modes button:nth-child(2)');
+await page.waitForTimeout(3000);
+await page.evaluate(() => window.app.timeline.onScrub(1600));
+await page.waitForTimeout(1500);
+const s3 = await page.evaluate(() => ({ mode: window.app.mode, year: Math.round(window.app.year), splats: window.stage.splats.length }));
+await page.click('.modes button:nth-child(1)');
+await page.waitForTimeout(3000);
+const s4 = await page.evaluate(() => ({ mode: window.app.mode, i: window.app.film.i }));
+await page.screenshot({ path: 'shots/smoke.png' });
+console.log(JSON.stringify({ s1, s2, panel, s3, s4 }));
+console.log(errors.length ? 'ERRORS:\n' + errors.join('\n') : 'no errors');
+await browser.close();

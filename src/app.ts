@@ -187,6 +187,7 @@ export class App {
   enterFree() {
     this.mode = 'free';
     this.film.token++;
+    this.titleOn = false;
     this.header.setMode('free');
     this.controls.enabled = true;
     this.filmBar.show(false);
@@ -233,11 +234,15 @@ export class App {
     this.chapterEvents = new Set(ch.events ?? []);
     const rig = this.stage.rig;
     const actChange = !prev || prev.act !== ch.act;
+    if (!actChange) {
+      this.titleOn = false;
+      this.actTitle.hideNow();
+    }
     this.caption.hide(actChange);
     if (actChange) {
       this.titleOn = true;
       const title = this.actTitle.show(act, prev ? 2.6 : 2.2).then(() => {
-        this.titleOn = false;
+        if (token === this.film.token) this.titleOn = false;
       });
       if (prev && prev.act < ch.act) {
         // the grand pull-back: the previous act shrinks into a glowing point
@@ -391,6 +396,10 @@ export class App {
 
   private key = (e: KeyboardEvent) => {
     if (this.mode === 'intro') return;
+    const tag = (e.target as HTMLElement | null)?.tagName;
+    if (tag === 'BUTTON' || tag === 'INPUT' || tag === 'TEXTAREA') {
+      if (e.key === ' ' || e.key === 'Enter') return;
+    }
     if (e.key === 'Escape') {
       this.select(null);
       return;

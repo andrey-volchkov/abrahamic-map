@@ -24,7 +24,14 @@ if (!webglOk()) {
     '<div class="intro"><h1 style="font-size:48px">Нужен WebGL 2</h1><div class="sub">Откройте страницу в свежей версии Chrome, Firefox, Safari или Edge.</div></div>';
 } else {
   const app = new App();
-  app.boot().then(() => {
+  app
+    .boot()
+    .catch((err) => {
+      console.error(err);
+      app.intro.progress(0, 'Не удалось загрузить данные карты. Обновите страницу.');
+      throw err;
+    })
+    .then(() => {
     // debugging / screenshots: ?v={"lon":..,"lat":..,"dist":..}&year=..&chapter=..
     const q = new URLSearchParams(location.search);
     if (q.get('fast')) animCfg.scale = 0.02;
